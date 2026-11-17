@@ -103,7 +103,7 @@ header h1 b{color:var(--lime)}
 <div id="app">
   <header>
     <h1>VIDEO<b>.</b></h1>
-    <button class="btn ic" id="bSet" title="Настройки">⚙</button>
+    <button class="btn ic" id="bSet" title="Настройки" style="display:none">⚙</button>
     <label class="btn lime" for="file" id="bUp">＋ Своё видео</label>
     <input type="file" id="file" accept="video/*" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
   </header>
@@ -656,7 +656,8 @@ function busy(on,t,s,prog){const b=$("#busy");b.classList.toggle("on",!!on);if(t
 
 /* ================= ИИ: Gemini ================= */
 let CFG=LS.get("mnt_cfg",{key:"",proxy:"",user:"",pass:"",model:""});
-const hasAI=()=>!!(CFG.key||CFG.proxy);
+const PUBLIC_AI="https://pomoshnik.jagser.deno.net/montage";
+const hasAI=()=>true;
 $("#bSet").onclick=()=>{$("#sKey").value=CFG.key;$("#sProxy").value=CFG.proxy;$("#sUser").value=CFG.user;$("#sPass").value=CFG.pass;$("#sheet").classList.add("on")};
 $("#sClose").onclick=()=>$("#sheet").classList.remove("on");
 $("#sSave").onclick=()=>{CFG={...CFG,key:$("#sKey").value.trim(),proxy:$("#sProxy").value.trim().replace(/\/$/,""),user:$("#sUser").value.trim(),pass:$("#sPass").value,model:""};LS.set("mnt_cfg",CFG);$("#sheet").classList.remove("on");toast("Сохранено");if(pendingFile){const f=pendingFile;pendingFile=null;analyze(f)}};
@@ -670,6 +671,10 @@ async function pickModel(){
   return CFG.model;
 }
 async function askAI(prompt,blob){
+  if(!CFG.key&&!CFG.proxy){
+    const r=await fetch(PUBLIC_AI,{method:"POST",headers:{"X-Meta":encodeURIComponent(JSON.stringify({mime:blob?blob.type:"text/plain",prompt}))},body:blob||new Blob([],{type:"application/octet-stream"})});
+    const j=await r.json().catch(()=>({error:"сервер не ответил"}));if(!r.ok||j.error)throw new Error(j.error||r.status);return j.text||"";
+  }
   if(CFG.proxy){
     const r=await fetch(CFG.proxy+"/analyze",{method:"POST",headers:{"X-User":encodeURIComponent(CFG.user),"X-Pass":encodeURIComponent(CFG.pass),"X-Meta":encodeURIComponent(JSON.stringify({mime:blob?blob.type:"text/plain",prompt}))},body:blob||new Blob([" "],{type:"text/plain"})});
     const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j.text||j.result||JSON.stringify(j);
