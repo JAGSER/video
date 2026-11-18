@@ -190,14 +190,16 @@ function Subs({chunks, style, theme = {}, split = 0}) {
   if (style == 'off') return null;
   const c = chunks.find((c) => T >= c.s && T < c.e); if (!c) return null;
   let idx = -1; c.forEach((w, i) => { if (T >= w.os) idx = i; });
-  const wrap = (children, extra = {}) => <div style={{position: 'absolute', left: 40, right: 40, top: 1380, display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '0 22px', ...extra}}>{children}</div>;
+  // отступы между словами полями, а не gap: при сборке MP4 gap теряется и слова слипаются
+  const sp = (ch, m) => Array.isArray(ch) ? ch.map((c, i) => <span key={i} style={{display: 'inline-block', margin: `0 ${m}px`}}>{c}</span>) : ch;
+  const wrap = (children, extra = {}) => <div style={{position: 'absolute', left: 40, right: 40, top: 1380, display: 'flex', justifyContent: 'center', flexWrap: 'wrap', ...extra}}>{sp(children, 11)}</div>;
   if (style == 'steps') {
     // как в пошаговых рилсах: белые слова без обводки; в режиме панели внизу панели, иначе по центру груди
     const y = interpolate(split, [0, 1], [1170, 815]);
     const vis = c.filter((w) => T >= w.os - 0.02);
     const k = clamp((T - c.s) / 0.12);
-    return <div style={{position: 'absolute', left: 60, right: 60, top: y, display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '0 16px', opacity: k, transform: `translateY(${(1 - k) * 10}px)`}}>
-      {c.map((w, i) => <span key={i} style={{fontFamily: FONTS.m, fontWeight: 700, fontSize: 58, letterSpacing: -0.5, color: '#fff', opacity: vis.includes(w) ? 1 : 0.55, textShadow: split > 0.5 ? 'none' : '0 3px 14px rgba(0,0,0,.65), 0 1px 3px rgba(0,0,0,.6)'}}>{w.w}</span>)}
+    return <div style={{position: 'absolute', left: 60, right: 60, top: y, display: 'flex', justifyContent: 'center', flexWrap: 'wrap', opacity: k, transform: `translateY(${(1 - k) * 10}px)`}}>
+      {c.map((w, i) => <span key={i} style={{display: 'inline-block', margin: '0 8px', fontFamily: FONTS.m, fontWeight: 700, fontSize: 58, letterSpacing: -0.5, color: '#fff', opacity: vis.includes(w) ? 1 : 0.55, textShadow: split > 0.5 ? 'none' : '0 3px 14px rgba(0,0,0,.65), 0 1px 3px rgba(0,0,0,.6)'}}>{w.w}</span>)}
     </div>;
   }
   if (style == 'pop') { const w = c[Math.max(0, idx)]; const s = spring({frame: Math.round((T - w.os) * fps), fps, config: {damping: 10, stiffness: 220}}); return wrap(<div style={{...SUB_FONT, fontSize: 110, color: idx % 2 ? TX : AC, textShadow: outline(ST, 7), transform: `scale(${0.5 + 0.5 * s}) rotate(${idx % 2 ? 3 : -3}deg)`}}>{w.w.toUpperCase()}</div>); }

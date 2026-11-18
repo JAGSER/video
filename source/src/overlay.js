@@ -29,12 +29,12 @@ function measure(d) {
 // brief: {duration, words:[{w,t0,t1}], subs:[{t0,t1,text}], faces:[{t,x,y,w,h}], title, palette}
 export function makeK(brief) {
   let g = null, boxes = [], curT = 0;
-  function record(kind, x, y, w, h, label) {
+  function record(kind, x, y, w, h, label, size) {
     if (!g || g.globalAlpha < 0.35) return;
     const m = g.getTransform();
     const pts = [[x, y], [x + w, y], [x, y + h], [x + w, y + h]].map(([a, b]) => [m.a * a + m.c * b + m.e, m.b * a + m.d * b + m.f]);
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-    boxes.push({kind, x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), label});
+    boxes.push({kind, x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys), label, size: size ? size * (Math.hypot(m.a, m.b) || 1) : 0});
   }
   function wrap(str, maxW) {
     const out = [];
@@ -42,7 +42,8 @@ export function makeK(brief) {
     return out;
   }
   function text(str, x, y, o = {}) {
-    str = String(str == null ? '' : str); if (!str.trim()) return {w: 0, h: 0, size: 0};
+    // ИИ иногда пишет перенос строки как текст «\n» (или «\п»): превращаем в настоящий перенос
+    str = String(str == null ? '' : str).replace(/\\[nп]/g, '\n'); if (!str.trim()) return {w: 0, h: 0, size: 0};
     const weight = o.weight || 700, align = o.align || 'center', lh = o.lineHeight || 1.2, maxLines = o.maxLines || 3, minSize = o.minSize || 26;
     const m = g.getTransform(), sx = Math.hypot(m.a, m.b) || 1;
     let maxW = o.maxWidth;
@@ -58,7 +59,7 @@ export function makeK(brief) {
     lines.forEach((l, i) => { if (o.stroke) g.strokeText(l, x, top + i * step); g.fillText(l, x, top + i * step); });
     const w = Math.max(...lines.map((l) => g.measureText(l).width));
     const bx = align === 'center' ? x - w / 2 : align === 'left' ? x : x - w;
-    record('text', bx, y - (lines.length * step) / 2, w, lines.length * step, str.slice(0, 40));
+    record('text', bx, y - (lines.length * step) / 2, w, lines.length * step, str.replace(/\n/g, ' ').slice(0, 40), f);
     g.restore();
     return {w, h: lines.length * step, size: f};
   }
@@ -162,11 +163,12 @@ export function selfCheck(rt, fns, duration) {
     const t0 = performance.now(); const e = drawFrame(ctx, rt, fns, t); ms = Math.max(ms, performance.now() - t0);
     if (e && !err) err = `на ${tt} с ошибка: ${e}`;
     const bx = rt.boxes(), txt = bx.filter((b) => b.kind == 'text'), solid = bx.filter((b) => b.kind != 'text' || true);
+    txt.forEach((b) => { if (b.size && b.size < 40) issues.add(`на ${tt} с текст «${b.label}» мелкий (${Math.round(b.size)} px): на телефоне не читается, минимум 44 px`); });
     txt.forEach((b) => { if (b.x0 < SAFE.x0 - 6 || b.x1 > SAFE.x1 + 6 || b.y0 < SAFE.y0 - 6 || b.y1 > SAFE.y1 + 6) issues.add(`на ${tt} с текст «${b.label}» выходит за безопасную зону (x 60…1020, y 110…1360)`); });
     const ov = (a, b) => { const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0); return w > 0 && h > 0 ? w * h : 0; };
     for (let a = 0; a < txt.length; a++) for (let b = a + 1; b < txt.length; b++) { const m = Math.min((txt[a].x1 - txt[a].x0) * (txt[a].y1 - txt[a].y0), (txt[b].x1 - txt[b].x0) * (txt[b].y1 - txt[b].y0)); if (m > 0 && ov(txt[a], txt[b]) / m > 0.08) issues.add(`на ${tt} с тексты «${txt[a].label}» и «${txt[b].label}» налезают друг на друга`); }
     const f = rt.K.face(t);
-    if (f) { const fb = {x0: f.x, y0: f.y, x1: f.x + f.w, y1: f.y + f.h}; solid.forEach((b) => { const o = ov(b, fb); if (o / Math.max(1, (fb.x1 - fb.x0) * (fb.y1 - fb.y0)) > 0.06) issues.add(`на ${tt} с ${b.kind == 'text' ? 'текст «' + b.label + '»' : b.label} закрывает лицо (лицо x ${Math.round(f.x)}…${Math.round(f.x + f.w)}, y ${Math.round(f.y)}…${Math.round(f.y + f.h)})`); }); }
+    if (f) { const fb = {x0: f.x - 50, y0: f.y - 40, x1: f.x + f.w + 50, y1: f.y + f.h + 30}; solid.forEach((b) => { const o = ov(b, fb); if (o / Math.max(1, (fb.x1 - fb.x0) * (fb.y1 - fb.y0)) > 0.06) issues.add(`на ${tt} с ${b.kind == 'text' ? 'текст «' + b.label + '»' : b.label} закрывает лицо (лицо x ${Math.round(f.x)}…${Math.round(f.x + f.w)}, y ${Math.round(f.y)}…${Math.round(f.y + f.h)})`); }); }
   }
   return {error: err, issues: [...issues].slice(0, 14), ms};
 }
