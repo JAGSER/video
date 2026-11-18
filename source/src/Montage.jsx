@@ -58,9 +58,9 @@ function TextLayer({L, f, fps}) {
   const size = clamp(+L.size || 80, 16, 240);
   const hl = (L.hl || []).map(norm);
   const st = L.stagger || 'none', step = clamp(+L.step || 0.1, 0.02, 0.5) * fps;
-  const box = L.box ? {background: L.box.color || 'rgba(0,0,0,.75)', borderRadius: clamp(+L.box.r || 20, 0, 80), padding: `${clamp(+L.box.pad || 22, 0, 80) * 0.7}px ${clamp(+L.box.pad || 22, 0, 80)}px`} : {};
+  const box = L.box ? {background: L.box.color || 'rgba(0,0,0,.75)', borderRadius: clamp(+L.box.r || 20, 0, 80), padding: `${clamp(+L.box.pad || 22, 0, 80) * 0.7}px ${clamp(+L.box.pad || 22, 0, 80)}px`, border: L.box.border || undefined, boxShadow: L.box.shadow || undefined} : {};
   const base = {fontFamily: FONTS[font], fontWeight: font == 'm' ? 700 : 900, fontStyle: font == 'l' ? 'italic' : 'normal', fontSize: size, lineHeight: 1.12, color: L.color || '#fff',
-    textShadow: L.stroke ? outline(L.stroke, Math.max(3, size * 0.06)) : '0 6px 18px rgba(0,0,0,.55)', textAlign: 'center', width: 'max-content', maxWidth: clamp(+L.maxW || 960, 120, 1040), whiteSpace: 'pre-wrap', ...box};
+    textShadow: L.stroke ? outline(L.stroke, Math.max(3, size * 0.06)) : '0 6px 18px rgba(0,0,0,.55)', textAlign: 'center', letterSpacing: isFinite(L.ls) ? +L.ls : undefined, textTransform: L.upper ? 'uppercase' : undefined, width: 'max-content', maxWidth: clamp(+L.maxW || 960, 120, 1040), whiteSpace: 'pre-wrap', ...box};
   const lines = String(L.text || '').split('\n');
   let wi = 0, ci = 0;
   return <div style={base}>{lines.map((ln, li) => <div key={li}>{ln.split(/\s+/).filter(Boolean).map((w, k) => {
@@ -126,6 +126,13 @@ function ShapeLayer({L, f, fps}) {
   });
   return <canvas ref={ref} width={E * 2} height={E * 2} style={{display: 'block', width: E * 2, height: E * 2}}/>;
 }
+function SvgLayer({L}) {
+  const w = clamp(+L.w || 300, 10, 1080), h = clamp(+L.h || w, 10, 1920);
+  let svg = String(L.svg || '');
+  if (!/^\s*<svg/i.test(svg)) return null;
+  if (!/xmlns=/.test(svg)) svg = svg.replace(/<svg/i, "<svg xmlns='http://www.w3.org/2000/svg'");
+  return <img src={'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)} width={w} height={h} style={{display: 'block', width: w, height: h}}/>;
+}
 function FrameLayer({L, src, srcT}) {
   const w = +L.w || 420, h = +L.h || 420, s = clamp(+L.s || 2, 1, 5), b = clamp(+L.b || 12, 0, 40);
   const cx = +L.cx || 540, cy = +L.cy || 800;
@@ -150,7 +157,7 @@ function Insert({n, src}) {
       const a = inAnim(L.in || 'pop', lf, fps), o = outAnim(L.out || 'fade', lf, ld), l = loopAnim(L.loop || 'none', lf / fps);
       const x = +L.x || 540, y = (+L.y || 600) + (n._dy || 0);
       const tr = `translate(-50%,-50%) translate(${a.dx + o.dx + l.dx}px,${a.dy + o.dy + l.dy}px) rotate(${(+L.rot || 0) + a.rot + l.rot}deg) scale(${a.sc * o.sc * l.sc})`;
-      const inner = L.k == 'text' ? <TextLayer L={L} f={lf} fps={fps}/> : L.k == 'emoji' ? <EmojiLayer L={L} f={lf} fps={fps} total={ld}/> : L.k == 'shape' ? <ShapeLayer L={L} f={lf} fps={fps}/> : L.k == 'frame' ? <FrameLayer L={L} src={src} srcT={n.t + (+L.at || 0)}/> : null;
+      const inner = L.k == 'text' ? <TextLayer L={L} f={lf} fps={fps}/> : L.k == 'emoji' ? <EmojiLayer L={L} f={lf} fps={fps} total={ld}/> : L.k == 'shape' ? <ShapeLayer L={L} f={lf} fps={fps}/> : L.k == 'svg' ? <SvgLayer L={L}/> : L.k == 'frame' ? <FrameLayer L={L} src={src} srcT={n.t + (+L.at || 0)}/> : null;
       return <div key={i} style={{position: 'absolute', left: x, top: y, transform: tr, opacity: clamp(a.al * o.al), transformOrigin: 'center'}}>{inner}</div>;
     })}
     {c.flash ? <AbsoluteFill style={{background: '#fff', opacity: 0.45 * (f < 2 ? f / 2 : clamp(1 - (f - 2) / 6))}}/> : null}
@@ -159,20 +166,21 @@ function Insert({n, src}) {
 
 // ===== субтитры =====
 const SUB_FONT = {fontFamily: FONTS.b, fontWeight: 900};
-function Subs({chunks, style}) {
+function Subs({chunks, style, theme = {}}) {
+  const AC = theme.accent || '#FFD43B', TX = theme.subText || '#fff', ST = theme.subStroke || '#000';
   const f = useCurrentFrame(), {fps} = useVideoConfig(), T = f / fps;
   if (style == 'off') return null;
   const c = chunks.find((c) => T >= c.s && T < c.e); if (!c) return null;
   let idx = -1; c.forEach((w, i) => { if (T >= w.os) idx = i; });
   const wrap = (children, extra = {}) => <div style={{position: 'absolute', left: 40, right: 40, top: 1380, display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '0 22px', ...extra}}>{children}</div>;
-  if (style == 'pop') { const w = c[Math.max(0, idx)]; const s = spring({frame: Math.round((T - w.os) * fps), fps, config: {damping: 10, stiffness: 220}}); return wrap(<div style={{...SUB_FONT, fontSize: 110, color: idx % 2 ? '#fff' : '#FFD43B', textShadow: outline('#000', 7), transform: `scale(${0.5 + 0.5 * s}) rotate(${idx % 2 ? 3 : -3}deg)`}}>{w.w.toUpperCase()}</div>); }
+  if (style == 'pop') { const w = c[Math.max(0, idx)]; const s = spring({frame: Math.round((T - w.os) * fps), fps, config: {damping: 10, stiffness: 220}}); return wrap(<div style={{...SUB_FONT, fontSize: 110, color: idx % 2 ? TX : AC, textShadow: outline(ST, 7), transform: `scale(${0.5 + 0.5 * s}) rotate(${idx % 2 ? 3 : -3}deg)`}}>{w.w.toUpperCase()}</div>); }
   if (style == 'type') { const vis = c.filter((w) => T >= w.os); return wrap(<div style={{fontFamily: FONTS.m, fontWeight: 700, fontSize: 58, color: '#fff', background: 'rgba(0,0,0,.82)', padding: '10px 26px', borderRadius: 18}}>{vis.map((w) => w.w).join(' ')}</div>); }
   return wrap(c.map((w, i) => {
     const on = i == idx;
     if (style == 'neon') return <span key={i} style={{...SUB_FONT, fontSize: 70, color: on ? '#fff' : '#FF4FA3', opacity: T >= w.os ? 1 : 0.45, textShadow: `0 0 ${on ? 30 : 14}px #FF4FA3`}}>{w.w}</span>;
     if (style == 'wave') { const y = on ? -22 * Math.sin(clamp((T - w.os) / 0.3) * Math.PI) : 0; return <span key={i} style={{...SUB_FONT, fontSize: 66, color: on ? '#C6FF3D' : '#fff', textShadow: outline('#000', 5), transform: `translateY(${y}px)`, display: 'inline-block'}}>{w.w}</span>; }
     const s = on ? 1 + 0.12 * clamp((T - w.os) / 0.1) : 1;
-    return <span key={i} style={{...SUB_FONT, fontSize: 66, color: on ? '#FFD43B' : '#fff', textShadow: outline('#000', 5), transform: `scale(${s})`, display: 'inline-block'}}>{w.w}</span>;
+    return <span key={i} style={{...SUB_FONT, fontSize: 66, color: on ? AC : TX, textShadow: outline(ST, 5), transform: `scale(${s})`, display: 'inline-block'}}>{w.w}</span>;
   }));
 }
 
@@ -188,7 +196,7 @@ function camAt(T, segIdx, inserts, jumpZoom) {
   return {z, x, y};
 }
 
-export const Montage = ({src, segs = [], inserts = [], chunks = [], subStyle = 'karaoke', jumpZoom = true, outDur = 1}) => {
+export const Montage = ({src, segs = [], inserts = [], chunks = [], subStyle = 'karaoke', jumpZoom = true, outDur = 1, theme = {}}) => {
   const f = useCurrentFrame(), {fps} = useVideoConfig(), T = f / fps;
   let segIdx = 0; segs.forEach((g, i) => { if (T >= g.o) segIdx = i; });
   const cam = camAt(T, segIdx, inserts, jumpZoom);
@@ -198,11 +206,11 @@ export const Montage = ({src, segs = [], inserts = [], chunks = [], subStyle = '
         <Video src={src} trimBefore={Math.round(g.s * fps)} objectFit="cover" style={{width: '100%', height: '100%'}}/>
       </Sequence>) : null}
     </AbsoluteFill>
-    <Subs chunks={chunks} style={subStyle}/>
+    <Subs chunks={chunks} style={subStyle} theme={theme}/>
     {inserts.map((n) => <Sequence key={n.id} from={Math.round(n.o * fps)} durationInFrames={Math.max(1, Math.round(n.d * fps))} layout="none">
       <Insert n={n} src={src}/>
       {n.sfx == 'pop' || n.sfx == 'thud' ? <Audio src={n.sfx == 'pop' ? 'a/pop.wav' : 'a/thud.wav'} volume={n.sfx == 'thud' ? 0.35 : 0.22}/> : null}
     </Sequence>)}
-    <div style={{position: 'absolute', left: 0, top: 0, height: 10, width: `${clamp(T / outDur) * 100}%`, background: '#FFD43B'}}/>
+    <div style={{position: 'absolute', left: 0, top: 0, height: 10, width: `${clamp(T / outDur) * 100}%`, background: theme.accent || '#FFD43B'}}/>
   </AbsoluteFill>;
 };
