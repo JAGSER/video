@@ -5,6 +5,8 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Player} from '@remotion/player';
 import {Montage} from '../Montage.jsx';
 import {LAYOUT, CHIP, SCREENS} from './demoMarkup.js';
+import {SCREENS_REAL as SCR} from './screens.js';
+import {lineModel} from '../edit.js';
 import './demo.css';
 
 const M = [
@@ -35,7 +37,7 @@ async function grabThumb(src, faces) {
   const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = src;
   await new Promise((r) => { v.onloadeddata = r; v.onerror = r; setTimeout(r, 4000); });
   if (!v.videoWidth) return null;
-  await new Promise((r) => { v.onseeked = r; v.currentTime = Math.min(1, (v.duration || 2) / 2); setTimeout(r, 2500); });
+  await new Promise((r) => { v.onseeked = r; v.currentTime = (v.duration || 2) * 0.35; setTimeout(r, 2500); });
   const W = 684, H = 380, c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
   const sc = Math.max(W / v.videoWidth, H / v.videoHeight) * 1.0;
   const f = (faces || [])[0];
@@ -50,7 +52,8 @@ async function grabThumb(src, faces) {
 
 export default function DemoApp({ctx}) {
   const {S} = ctx;
-  const [mode, setMode] = useState(0);
+  const mode = ctx.fn || 0, setMode = ctx.setFn;
+  const [play, setPlay] = useState(false);
   const [dir, setDir] = useState('40px');
   const [liked, setLiked] = useState(() => LSget('ai_montage_liked', {}) || {});
   const [only, setOnly] = useState(false);
@@ -61,6 +64,8 @@ export default function DemoApp({ctx}) {
   const rootRef = useRef(null), sx = useRef(null), inputRef = useRef(null);
 
   useEffect(() => { const f = () => setScale(Math.min(window.innerWidth / 390, window.innerHeight / 844)); f(); window.addEventListener('resize', f); return () => window.removeEventListener('resize', f); }, []);
+  // событие функции: анимация её экрана играет один раз (как один цикл демо), потом спокойное новое состояние
+  useEffect(() => { if (!S.anim) return; setPlay(true); const t = setTimeout(() => setPlay(false), 3700); return () => clearTimeout(t); }, [S.anim && S.anim.key]);
   useEffect(() => { setThumb(null); if (!S.src) return; let ok = true; grabThumb(S.src, S.faces).then((u) => { if (ok && u) setThumb(u); }); return () => { ok = false; }; }, [S.src, S.faces && S.faces.length]);
 
   const list = useMemo(() => { const all = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]; if (only) { const l = all.filter((i) => liked[i]); if (l.length) return l; } return all; }, [only, liked]);
@@ -87,9 +92,13 @@ export default function DemoApp({ctx}) {
       onlyLabel: only2 ? 'Все варианты' : 'Мои: ' + nLiked, onlyBg: only2 ? '#C6FF3D' : 'transparent', onlyFg: only2 ? '#0B0B0F' : '#F4F4F6', onlyBorder: only2 ? '#C6FF3D' : '#3A3A46',
       likeLabel: isLiked ? 'В отмеченных' : 'Отметить', likeBg: isLiked ? '#C6FF3D' : 'transparent', likeFg: isLiked ? '#0B0B0F' : '#C6FF3D', likeFill: isLiked ? '#0B0B0F' : 'none',
     };
-    v.screen = SCREENS[cur]({edir: dir, pv, badge: M[cur].badge, p: pFor(cur)});
+    const real = S.phr && S.phr.length;
+    const anim = S.anim && S.anim.fn == cur ? S.anim : null;
+    let scr;
+    try { scr = real ? SCR[cur]({S, model: lineModel(S), anim, play: play && !!anim, busy: !!ctx.busy, pv, badge: anim ? anim.badge : '', dur: ctx.fmt(ctx.R.outDur), fmt: ctx.fmt, edir: dir, progress: ctx.prog, R: ctx.R}) : null; } catch (er) { console.error(er); scr = null; }
+    v.screen = '<div class="' + (ctx.busy ? 'busyon' : (real ? 'idle' : '')) + '">' + (scr || SCREENS[cur]({edir: dir, pv, badge: M[cur].badge, p: pFor(cur)})) + '</div>';
     return LAYOUT(v);
-  }, [cur, dir, only, liked, list, thumb, texts, S.src, ctx.rec, ctx.cmd, ctx.busy && ctx.busy.t]);
+  }, [cur, dir, only, liked, list, thumb, texts, S, play, ctx.R, ctx.prog, ctx.rec, ctx.cmd, ctx.busy && ctx.busy.t]);
 
   // прокрутка ленты чипов к выбранному, как в демо
   useEffect(() => {
@@ -99,6 +108,8 @@ export default function DemoApp({ctx}) {
   }, [cur]);
 
   const onClick = (e) => {
+    const da = e.target.closest('[data-act]');
+    if (da) { e.stopPropagation(); return ctx.act(da.dataset.act, da.dataset.arg); }
     const t = e.target.closest('[data-pick],[data-click],.pv');
     if (!t) return;
     if (t.dataset.pick != null) { const i = +t.dataset.pick; setDir(i > cur ? '40px' : '-40px'); setMode(i); return; }
@@ -108,7 +119,7 @@ export default function DemoApp({ctx}) {
     if (a == 'toggleLike') { const nl = {...liked}; if (nl[cur]) delete nl[cur]; else nl[cur] = true; try { localStorage.setItem('ai_montage_liked', JSON.stringify(nl)); } catch (er) {} setLiked(nl); setMode(cur); return; }
     if (a == 'toggleOnly') { if (Object.keys(liked).length || only) setOnly(!only); return; }
     if (a == 'mic') { e.stopPropagation(); return ctx.mic(); }
-    if (a == 'voice') { setTyping(true); setTimeout(() => inputRef.current && inputRef.current.focus(), 50); return; }
+    if (a == 'voice') { if (!ctx.cmd) ctx.setCmd(M[cur].cmd.replace(/[«»]/g, '')); setTyping(true); setTimeout(() => inputRef.current && inputRef.current.focus(), 50); return; }
     if (t.classList.contains('pv')) { if (!S.src) ctx.fileRef.current && ctx.fileRef.current.click(); else setOpen(true); }
   };
   const swStart = (e) => { if (!e.target.closest('[data-touchstart],[data-mousedown]')) return; const p = e.touches ? e.touches[0] : e; sx.current = p.clientX; };

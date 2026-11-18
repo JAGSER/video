@@ -2,6 +2,7 @@ import React from 'react';
 import {AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig, spring, interpolate} from 'remotion';
 import {Video, Audio} from '@remotion/media';
 import {makeK, compile, drawFrame} from './overlay.js';
+import {Intro, Transitions, camBoost} from './fx.jsx';
 
 export const FPS = 30;
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
@@ -214,10 +215,10 @@ function camAt(T, segIdx, inserts, jumpZoom) {
   return {z, x, y};
 }
 
-export const Montage = ({src, segs = [], inserts = [], chunks = [], subStyle = 'karaoke', jumpZoom = true, outDur = 1, theme = {}, overlay = null, soundUrl = null}) => {
+export const Montage = ({src, segs = [], inserts = [], chunks = [], subStyle = 'karaoke', jumpZoom = true, outDur = 1, theme = {}, overlay = null, soundUrl = null, intro = null, trans = null, etype = null}) => {
   const f = useCurrentFrame(), {fps} = useVideoConfig(), T = f / fps;
   let segIdx = 0; segs.forEach((g, i) => { if (T >= g.o) segIdx = i; });
-  const cam = camAt(T, segIdx, inserts, jumpZoom);
+  const cam = camAt(T, segIdx, inserts, jumpZoom && etype != 'cinema' && etype != 'calm'); cam.z *= camBoost(T, segs, etype) || 1;
   const g0 = segs[segIdx]; const srcT = g0 ? g0.s + Math.max(0, Math.min(T - g0.o, g0.e - g0.s)) : T;
   return <AbsoluteFill style={{background: '#000', overflow: 'hidden'}}>
     <AbsoluteFill style={{transform: `translate(${cam.x}px,${cam.y}px) scale(${cam.z})`, transformOrigin: '540px 800px'}}>
@@ -225,6 +226,7 @@ export const Montage = ({src, segs = [], inserts = [], chunks = [], subStyle = '
         <Video src={src} trimBefore={Math.round(g.s * fps)} objectFit="cover" style={{width: '100%', height: '100%'}}/>
       </Sequence>) : null}
     </AbsoluteFill>
+    {trans || etype ? <Transitions segs={segs} trans={trans} etype={etype}/> : null}
     <Overlay ov={overlay} srcT={srcT}/>
     <Subs chunks={chunks} style={subStyle} theme={theme}/>
     {inserts.map((n) => <Sequence key={n.id} from={Math.round(n.o * fps)} durationInFrames={Math.max(1, Math.round(n.d * fps))} layout="none">
@@ -232,6 +234,7 @@ export const Montage = ({src, segs = [], inserts = [], chunks = [], subStyle = '
       {n.sfx == 'pop' || n.sfx == 'thud' ? <Audio src={n.sfx == 'pop' ? 'a/pop.wav' : 'a/thud.wav'} volume={n.sfx == 'thud' ? 0.35 : 0.22}/> : null}
     </Sequence>)}
     {soundUrl ? segs.map((g, i) => <Sequence key={'sfx' + i + ':' + g.s} from={Math.round(g.o * fps)} durationInFrames={Math.max(1, Math.round((g.e - g.s) * fps))}><Audio src={soundUrl} trimBefore={Math.round(g.s * fps)}/></Sequence>) : null}
+    {intro ? <Intro intro={intro}/> : null}
     <div style={{position: 'absolute', left: 0, top: 0, height: 10, width: `${clamp(T / outDur) * 100}%`, background: theme.accent || '#FFD43B'}}/>
   </AbsoluteFill>;
 };

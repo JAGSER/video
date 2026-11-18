@@ -114,5 +114,10 @@ body{margin:0}
 /* событие: анимации экрана проигрываются один раз; индикаторы ожидания крутятся всегда */
 .once [class],.once{animation-iteration-count:1!important;animation-fill-mode:both}
 .once .dot,.once .wv,.once .ring,.once .spin,.once .bob,.once .twinkle,.once .wipe,.once .pbar>div,.busyon .pbar>div{animation-iteration-count:infinite!important}
-.still [class]{animation:none!important}
-.still .dot,.still .wv,.still .ring{animation-iteration-count:infinite}
+.still [class]:not(.dot):not(.wv):not(.ring):not(.cmd):not(.pbar):not(.live):not(.live *):not(.spin):not(.bob):not(.wipe):not(.twinkle){animation:none!important}
+.idle .ai,.idle .pbar{display:none}
+.spd:empty{display:none}
+@keyframes selmv{from{transform:translateY(var(--from))}to{transform:none}}
+.selmv{animation:selmv .5s cubic-bezier(.5,0,.2,1) .3s both}
+@keyframes jmp{from{transform:translate(var(--fx),var(--fy))}to{transform:none}}
+.jmp{animation:jmp .55s cubic-bezier(.5,0,.3,1) .3s both}

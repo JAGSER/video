@@ -1,6 +1,8 @@
 import React, {useEffect, useMemo, useRef, useState, useCallback} from 'react';
 import {Montage, FPS} from './Montage.jsx';
 import DemoApp from './ui/DemoApp.jsx';
+import {buildPhrases, derive as deriveEdit, segsFor, segsForRange} from './edit.js';
+import {route, runOp} from './ops.js';
 import {askAI, b64, parseJSON, audioWav, grabFrames, ANALYZE_PROMPT, OVERLAY_PROMPT, styleRules, STYLE_PICK, askClaudeChat, extractCode} from './ai.js';
 import {makeK, compile, selfCheck, makeSoundWav} from './overlay.js';
 
@@ -85,7 +87,8 @@ export default function App() {
   const [only, setOnly] = useState(false);
   const [q, setQ] = useState(LS.get('mnt_q', 1080));
   const [pickStyle, setPickStyle] = useState('');
-  const R = useMemo(() => derive(S), [S]);
+  const R = useMemo(() => deriveEdit(S), [S]);
+  const [fn, setFn] = useState(0);
   const RRef = useRef(R); RRef.current = R;
   const toastT = useRef(0);
   const toast = useCallback((t, ai, ms = 2800) => { setToast({t, on: true, ai}); clearTimeout(toastT.current); toastT.current = setTimeout(() => setToast((x) => ({...x, on: false})), ms); }, []);
@@ -176,7 +179,8 @@ ${subs}
         const words = (an.words || []).filter((w) => w && w.w && isFinite(w.s)).map((w) => ({w: String(w.w), s: +w.s, e: isFinite(w.e) && w.e > w.s ? +w.e : +w.s + 0.3})).sort((a, b) => a.s - b.s);
         const faces = (an.faces || []).filter((f) => f && [f.t, f.x, f.y, f.w, f.h].every(isFinite)).map((f) => ({t: +f.t, x: +f.x, y: +f.y, w: +f.w, h: +f.h}));
         st = {...st, words, faces, keep: (an.keep || []).filter((k) => isFinite(k.s) && isFinite(k.e)).map((k) => ({s: +k.s, e: +k.e})), title: an.title || '', an, inserts: [], cuts: []};
-        update((s) => Object.assign(s, {words: st.words, faces: st.faces, keep: st.keep, title: st.title, an, inserts: [], cuts: []}), false);
+        const phr = buildPhrases(st.words);
+        update((s) => Object.assign(s, {words: st.words, faces: st.faces, keep: st.keep, title: st.title, an, inserts: [], cuts: [], phr, order: phr.map((p) => p.id), drop: [], reels: null, scenes: [], pick: [], intro: null, trans: null, etype: null, anim: null}), false);
       }
       const styleId = forceStyle || (stylesRef.current.some((x) => x.id == an.style) ? an.style : (stylesRef.current[0] || {}).id);
       const res = await buildOverlay({...st, dur}, an, styleId, (t, round, i) => setBusy((b) => ({t: t || (b && b.t) || 'Claude рисует…', s: round ? 'Правка по замечаниям проверки' : 'Один вызов на весь ролик, обычно 1-2 минуты' + (i != null ? ' · ' + i * 3 + ' с' : ''), p: Math.min(0.95, 0.3 + (round || 0) * 0.2 + (i || 0) * 0.004)})));
@@ -235,28 +239,71 @@ ${subs}
     const t = norm(text);
     if (/пауз/.test(t) && !/графи|плашк|текст/.test(t)) { const on = !/(верн|не выреза)/.test(t); update((s) => { s.removePauses = on; }); return toast(on ? '✂ Паузы вырезаны' : '↔ Паузы вернул', true); }
     if (/(отмен|как было)/.test(t)) return undo();
+    try {
+      setBusy({t: 'ИИ слушает…', s: text.slice(0, 80), p: 0.15});
+      const r = await route(text, SRef.current, fn);
+      setBusy(null);
+      if (r && r.fn >= 0) return doFn(r.fn, r.params, text);
+    } catch (e) { setBusy(null); console.error(e); }
     if (!S.overlay) return toast('Сначала дождись монтажа');
     await editCode(text + ` (сейчас на экране момент ${mapSrc(R.segs, T).toFixed(1)} с исходного видео)`);
   }
   // ===== экспорт =====
-  async function exportMp4() {
+  const [prog, setProg] = useState(null);
+  async function exportMp4(part, label, k, n) {
     try {
       const {renderMediaOnWeb} = await import('@remotion/web-renderer');
-      setBusy({t: 'Собираю MP4…', s: 'Не выключайте экран', p: 0});
+      const P = part || R, tag = label ? label + ': ' : '';
+      setBusy({t: tag + 'Собираю MP4…', s: 'Не выключайте экран', p: 0});
       const scale = q == 1080 ? 1 : 720 / 1080;
       const res = await renderMediaOnWeb({
-        composition: {id: 'montage', component: Montage, durationInFrames: Math.max(1, Math.round(R.outDur * FPS)), fps: FPS, width: 1080, height: 1920},
-        inputProps: {src: S.src, segs: R.segs, inserts: R.inserts, chunks: R.chunks, subStyle: S.subStyle, jumpZoom: S.jumpZoom, outDur: R.outDur, theme: S.theme, overlay: S.overlay, soundUrl: S.soundUrl},
+        composition: {id: 'montage', component: Montage, durationInFrames: Math.max(1, Math.round(P.outDur * FPS)), fps: FPS, width: 1080, height: 1920},
+        inputProps: {src: S.src, segs: P.segs, inserts: [], chunks: P.chunks, subStyle: S.subStyle, jumpZoom: S.jumpZoom, outDur: P.outDur, theme: S.theme, overlay: S.overlay, soundUrl: S.soundUrl, intro: part ? null : S.intro, trans: S.trans, etype: S.etype},
         container: 'mp4', videoCodec: 'h264', scale, videoBitrate: 'high',
-        onProgress: (p) => setBusy({t: 'Собираю MP4…', s: Math.round(p.progress * 100) + '% · не выключайте экран', p: p.progress}),
+        onProgress: (p) => { const all = ((k || 0) + p.progress) / (n || 1); setProg(all); setBusy({t: tag + 'Собираю MP4…', s: Math.round(p.progress * 100) + '% · не выключайте экран', p: p.progress}); },
       });
       const blob = await res.getBlob();
       setBusy(null);
-      const name = 'montazh_' + new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '') + '.mp4';
+      const name = (label ? label.replace(/[^a-zA-Zа-яА-Я0-9]+/g, '_') + '_' : 'montazh_') + new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '') + '.mp4';
       window.__lastExport = {size: blob.size, name}; window.__lastBlob = blob;
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
       toast('⬇ Готово: ' + name + ' (' + (blob.size / 1e6).toFixed(1) + ' МБ)', true, 5000);
-    } catch (e) { setBusy(null); toast('Сборка не удалась: ' + e.message, false, 6000); console.error(e); }
+      return true;
+    } catch (e) { setBusy(null); toast('Сборка не удалась: ' + e.message, false, 6000); console.error(e); return false; }
+  }
+  // несколько файлов подряд: ролики из «На 3 ролика» или отмеченные сцены
+  async function exportMany(parts) {
+    setProg(0);
+    for (let i = 0; i < parts.length; i++) { const ok = await exportMp4(parts[i].r, parts[i].label, i, parts.length); if (!ok) break; }
+    setProg(1); setTimeout(() => setProg(null), 4000);
+  }
+  // ===== 10 функций: ИИ решает, что делать, анимация экрана играет на результате =====
+  async function doFn(f, params, src) {
+    const cur0 = SRef.current;
+    if (!cur0.phr || !cur0.phr.length) return toast(cur0.src ? 'Подожди, ИИ ещё разбирает речь' : 'Сначала загрузи видео');
+    setFn(f);
+    const t0 = performance.now();
+    setBusy({t: 'ИИ монтирует…', s: src || '', p: 0.3});
+    try {
+      const res = await runOp(f, params || {}, SRef.current);
+      const sec = ((performance.now() - t0) / 1000).toFixed(1);
+      setBusy(null);
+      const RU = {karaoke: 'Караоке', pop: 'Поп', type: 'Печать', neon: 'Неон', wave: 'Волна', off: 'без субтитров', zoom: 'Зум-удар', wipe: 'Шторка', glitch: 'Глитч', mix: 'Жидкость', adhd: 'СДВГ монтаж', cinema: 'Кино', vlog: 'Влог', podcast: 'Подкаст', ad: 'Реклама', calm: 'Спокойный'};
+      let label = String(res.anim && res.anim.badge || 'готово').replace(/\b(karaoke|pop|type|neon|wave|off|zoom|wipe|glitch|mix|adhd|cinema|vlog|podcast|ad|calm)\b/g, (m) => RU[m] || m);
+      if (f == 9) { const r2 = deriveEdit({...SRef.current, ...(res.patch || {})}); label = (RU[res.patch.etype] || res.patch.etype) + ' · ' + ((r2.phrSegs || []).length / Math.max(1, r2.outDur)).toFixed(1) + ' склейки/с'; }
+      update((s) => { Object.assign(s, res.patch || {}); s.anim = {...res.anim, fn: f, key: Date.now(), badge: (+sec >= 0.3 ? sec + ' с · ' : '') + label}; });
+      if (f == 5) setTimeout(() => act('dl-scenes'), 2600);
+    } catch (e) { setBusy(null); toast('Не вышло: ' + e.message, false, 6000); console.error(e); }
+  }
+  function act(a, arg) {
+    const st = SRef.current;
+    if (a == 'sub') return doFn(7, arg);
+    if (a == 'trans') return doFn(8, arg);
+    if (a == 'etype') return doFn(9, arg);
+    if (a == 'scene') { const i = +arg; update((s) => { const p = new Set(s.pick || []); if (p.has(i)) p.delete(i); else p.add(i); s.pick = [...p].sort((x, y) => x - y); }, false); return; }
+    if (a == 'dl-reels' && st.reels) return exportMany(st.reels.map((ids, i) => ({r: segsFor(st, ids), label: 'Reels ' + (i + 1)})));
+    if (a == 'dl-scenes') { const sc = st.scenes || [], pk = (st.pick || []).filter((i) => sc[i]); if (!pk.length) return toast('Отметь сцены'); return exportMany(pk.map((i) => ({r: segsForRange(st, sc[i].s, sc[i].e), label: 'Сцена ' + (i + 1)}))); }
+    if (a == 'fn') return doFn(+arg);
   }
 
   // ===== микрофон =====
@@ -295,7 +342,7 @@ ${subs}
     return out;
   }, [S.words, R]);
   const durF = Math.max(1, Math.round(R.outDur * FPS));
-  const inputProps = {src: S.src, segs: R.segs, inserts: R.inserts, chunks: R.chunks, subStyle: S.subStyle, jumpZoom: S.jumpZoom, outDur: R.outDur, theme: S.theme, overlay: S.overlay, soundUrl: S.soundUrl};
-  const ctx = {S, R, T, mode, setMode, busy, toastS, cmd, setCmd, rec, likedSub, setLikedSub, only, setOnly, q, setQ, styles, pickStyle, setPickStyle, selId, player, fileRef, lineRef, onFile, analyze, checkDesign, undo, update, seek, exportMp4, mic, run, onLineDown, selectIns, inputProps, phrases, durF, FPS, SUBS, SUB_KEYS, fmt, LS};
+  const inputProps = {src: S.src, segs: R.segs, inserts: [], chunks: R.chunks, subStyle: S.subStyle, jumpZoom: S.jumpZoom, outDur: R.outDur, theme: S.theme, overlay: S.overlay, soundUrl: S.soundUrl, intro: S.intro, trans: S.trans, etype: S.etype};
+  const ctx = {S, R, T, mode, setMode, busy, toastS, cmd, setCmd, rec, likedSub, setLikedSub, only, setOnly, q, setQ, styles, pickStyle, setPickStyle, selId, player, fileRef, lineRef, onFile, analyze, checkDesign, undo, update, seek, exportMp4, mic, run, onLineDown, selectIns, inputProps, phrases, durF, fn, setFn, act, doFn, prog, FPS, SUBS, SUB_KEYS, fmt, LS};
   return <DemoApp ctx={ctx}/>;
 }
