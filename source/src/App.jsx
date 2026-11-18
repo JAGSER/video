@@ -1,7 +1,8 @@
 import React, {useEffect, useMemo, useRef, useState, useCallback} from 'react';
 import {Player} from '@remotion/player';
 import {Montage, FPS} from './Montage.jsx';
-import {askAI, askClaude, GFX_DOC, b64, parseJSON, audioWav, grabFrames, ANALYZE_PROMPT, DESIGN_PROMPT, CHECK_PROMPT} from './ai.js';
+import {askAI, b64, parseJSON, audioWav, grabFrames, ANALYZE_PROMPT, OVERLAY_PROMPT, styleRules, STYLE_PICK, askClaudeChat, extractCode} from './ai.js';
+import {makeK, compile, selfCheck, makeSoundWav} from './overlay.js';
 
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
 const fmt = (t) => { t = Math.max(0, t); return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0'); };
@@ -68,7 +69,7 @@ function derive(S) {
 function mapSrc(segs, T) { for (let i = 0; i < segs.length; i++) { const g = segs[i]; if (T < g.o + (g.e - g.s) || i == segs.length - 1) return g.s + clamp(T - g.o, 0, g.e - g.s); } return 0; }
 
 export default function App() {
-  const [S, setS] = useState({dur: 0, words: [], keep: [], inserts: [], cuts: [], faces: [], subStyle: 'karaoke', removePauses: false, jumpZoom: true, title: '', src: null, theme: {}, an: null});
+  const [S, setS] = useState({dur: 0, words: [], keep: [], inserts: [], cuts: [], faces: [], subStyle: 'karaoke', removePauses: false, jumpZoom: true, title: '', src: null, theme: {}, an: null, overlay: null, soundUrl: null, styleId: ''});
   const SRef = useRef(S); SRef.current = S;
   const hist = useRef([]);
   const fileRef = useRef(null);
@@ -83,6 +84,7 @@ export default function App() {
   const [likedSub, setLikedSub] = useState(LS.get('mnt_liked_sub', []));
   const [only, setOnly] = useState(false);
   const [q, setQ] = useState(LS.get('mnt_q', 1080));
+  const [pickStyle, setPickStyle] = useState('');
   const R = useMemo(() => derive(S), [S]);
   const RRef = useRef(R); RRef.current = R;
   const toastT = useRef(0);
@@ -101,63 +103,114 @@ export default function App() {
     const dur = await new Promise((res) => { const v = document.createElement('video'); v.preload = 'metadata'; v.onloadedmetadata = () => res(v.duration); v.onerror = () => res(0); v.src = url; });
     if (!dur) return toast('Видео не открылось');
     hist.current = [];
-    setS({dur, words: [], keep: [], inserts: [], cuts: [], faces: [], subStyle: SRef.current.subStyle, removePauses: false, jumpZoom: true, title: '', src: url, file, theme: {}, an: null});
+    setS({dur, words: [], keep: [], inserts: [], cuts: [], faces: [], subStyle: SRef.current.subStyle, removePauses: false, jumpZoom: true, title: '', src: url, file, theme: {}, an: null, overlay: null, soundUrl: null, styleId: ''});
     analyze(file, url, dur);
   }
-  async function analyze(file, url, dur) {
+  // ===== стили «Помощника» =====
+  const [styles, setStyles] = useState([]);
+  useEffect(() => { const base = [{id: 'std', name: 'Стандартный', desc: 'Основной стиль «Помощника»: светлые плашки, рисунки линией, терракотовый акцент'}]; fetch('styles/index.json').then((r) => r.json()).then((a) => setStyles(base.concat(a.filter((x) => x && x.id)))).catch(() => setStyles(base)); }, []);
+  const stylesRef = useRef(styles); stylesRef.current = styles;
+  async function loadStyle(id) {
+    if (id == 'std') return {id, lib: '', konst: '', sys: OVERLAY_PROMPT, example: ''};
+    const getF = async (f) => { const r = await fetch(`styles/${encodeURIComponent(id)}/${f}`); if (!r.ok) throw new Error(f + ': ' + r.status); return r.text(); };
+    const [lib, doc, ex] = await Promise.all([getF('lib.js'), getF('doc.md'), getF('example.js').catch(() => '')]);
+    const m = lib.match(/(?:^|\n)\s*(?:const|var|let)\s+([A-Za-z_$][\w$]*)\s*=/); const konst = m ? m[1] : 'стиля';
+    return {id, lib, konst, sys: OVERLAY_PROMPT + '\n\n' + styleRules(konst) + doc, example: ex};
+  }
+  function makeBrief(st) {
+    const words = st.words.map((w) => ({w: w.w, t0: w.s, t1: w.e}));
+    const subs = []; let cur = null;
+    for (const w of st.words) { if (!cur || w.s - cur.t1 > 0.7) { cur = {t0: w.s, t1: w.e, text: w.w}; subs.push(cur); } else { cur.t1 = w.e; cur.text += ' ' + w.w; } if (/[.!?…]$/.test(w.w)) cur = null; }
+    return {duration: st.dur, words, subs, faces: st.faces, title: st.title};
+  }
+  function briefText(st, an) {
+    const fc = (st.faces || []).map((f) => `${f.t.toFixed(1)}:${Math.round(f.x)},${Math.round(f.y)},${Math.round(f.w)}x${Math.round(f.h)}`).join(' ');
+    const subs = makeBrief(st).subs.map((p) => `[${p.t0.toFixed(2)}–${p.t1.toFixed(2)}] ${p.text}`).join('\n');
+    return `ВИДЕО: ${st.dur.toFixed(1)} с, тема «${st.title}». ${an && an.summary ? an.summary : ''}
+РЕЧЬ (фразы со временем, секунды):
+${subs}
+СЦЕНЫ И ПРЕДМЕТЫ В КАДРЕ (координаты 1080x1920): ${JSON.stringify((an && an.scenes) || [])}
+КЛЮЧЕВЫЕ МОМЕНТЫ: ${JSON.stringify((an && an.moments) || [])}
+ЛИЦО (t:x,y,ш x в), это же отдаёт k.face(t): ${fc}
+Сделай графику монтажа поверх этого видео.`;
+  }
+  // Claude пишет код графики; программа проверяет его бесплатно и просит исправить только при ошибках
+  async function buildOverlay(st, an, styleId, note) {
+    const style = await loadStyle(styleId);
+    const FENCE = '```';
+    const intro = style.example ? 'ПРИМЕР ЭТОГО СТИЛЯ (полноэкранный ролик на другую тему; изучи язык стиля, но фон и рамку кадра не рисуй):\n' + FENCE + 'js\n' + style.example + '\n' + FENCE + '\n\n' : '';
+    const msgs = [{role: 'user', content: intro + briefText(st, an)}];
+    const brief = makeBrief(st);
+    let code = null, model = 'claude-opus-5-5';
+    for (let round = 0; round < 3; round++) {
+      note(round == 0 ? 'Claude рисует графику в стиле «' + (stylesRef.current.find((x) => x.id == styleId)?.name || styleId) + '»…' : 'Claude исправляет замечания…', round);
+      const txt = await askClaudeChat({system: style.sys, messages: msgs, model, max_tokens: 20000}, (i) => note(null, round, i));
+      const c = extractCode(txt);
+      msgs.push({role: 'assistant', content: txt});
+      if (!c) { msgs.push({role: 'user', content: 'Ответ без кода. Пришли код целиком одним блоком ```js.'}); model = 'claude-sonnet-5-5'; continue; }
+      code = c;
+      let fns, chk;
+      try { fns = compile(style.lib, code); chk = selfCheck(makeK(brief), fns, st.dur); } catch (e) { chk = {error: String(e.message || e), issues: []}; }
+      const problems = [chk.error, ...(chk.issues || [])].filter(Boolean);
+      if (!problems.length || round == 2) break;
+      msgs.push({role: 'user', content: 'Проверка кадров нашла замечания:\n- ' + problems.join('\n- ') + '\nИсправь и пришли код целиком.'});
+      model = 'claude-sonnet-5-5';
+    }
+    if (!code) throw new Error('Claude не прислал код графики');
+    let soundUrl = null; try { soundUrl = makeSoundWav(compile(style.lib, code), makeK(brief), st.dur); } catch (e) {}
+    return {overlay: {lib: style.lib, code, brief, styleId, sys: style.sys, msgs: msgs.slice(-2)}, soundUrl};
+  }
+  async function analyze(file, url, dur, forceStyle) {
     try {
-      setBusy({t: 'Gemini смотрит ролик…', s: 'Готовлю кадры', p: 0});
-      const frames = await grabFrames(url, dur, (i, n) => setBusy({t: 'Gemini смотрит ролик…', s: 'Кадры: ' + i + ' из ' + n, p: i / n * 0.15}));
-      setBusy({t: 'Gemini слушает ролик…', s: 'Достаю звук', p: 0.18});
-      const wav = await audioWav(file);
-      if (wav.size > 14e6) throw new Error('ролик слишком длинный, до 5 минут');
-      const parts = [{mime: 'audio/wav', data: await b64(wav)}];
-      for (const f of frames) { parts.push({text: 'кадр t=' + f.t.toFixed(1) + ' с'}); parts.push({mime: 'image/jpeg', data: f.data}); }
-      setBusy({t: 'Gemini разбирает речь и сцены…', s: 'Субтитры, лицо, предметы, ключевые моменты', p: 0.22});
-      const an = parseJSON(await askAI(ANALYZE_PROMPT(dur, frames), parts, 0.2));
-      const words = (an.words || []).filter((w) => w && w.w && isFinite(w.s)).map((w) => ({w: String(w.w), s: +w.s, e: isFinite(w.e) && w.e > w.s ? +w.e : +w.s + 0.3})).sort((a, b) => a.s - b.s);
-      const faces = (an.faces || []).filter((f) => f && [f.t, f.x, f.y, f.w, f.h].every(isFinite)).map((f) => ({t: +f.t, x: +f.x, y: +f.y, w: +f.w, h: +f.h}));
-      update((s) => { s.words = words; s.faces = faces; s.keep = (an.keep || []).filter((k) => isFinite(k.s) && isFinite(k.e)).map((k) => ({s: +k.s, e: +k.e})); s.title = an.title || ''; s.an = an; s.inserts = []; s.cuts = []; }, false);
-      // ключевые кадры для Claude: примерно каждые 2.5 с, максимум 14
-      const step = Math.max(1, Math.round(frames.length / 14)), kf = frames.filter((_, i) => i % step == 0).slice(0, 14);
-      const anForClaude = {title: an.title, summary: an.summary, words: words.map((w) => w.w + '@' + w.s.toFixed(2)).join(' '), keep: an.keep, faces, scenes: an.scenes, moments: an.moments, keyframes: kf.map((f) => +f.t.toFixed(1))};
-      setBusy({t: 'Claude делает дизайн…', s: 'Палитра, плашки, стикеры, вставки. Обычно 1-2 минуты.', p: 0.35});
-      const design = parseJSON(await askClaude(DESIGN_PROMPT(dur, anForClaude), kf.map((f) => ({mime: 'image/jpeg', data: f.data})), (i) => setBusy({t: 'Claude делает дизайн…', s: 'Палитра, плашки, стикеры, вставки · ' + (i * 3) + ' с', p: Math.min(0.7, 0.35 + i * 0.004)})));
-      const inserts = (design.inserts || []).filter((n) => n && isFinite(n.t)).map((n) => cleanIns(n, 0, dur));
-      update((s) => { s.inserts = inserts; s.theme = design.theme || {}; }, false);
-      await new Promise((r) => setTimeout(r, 300));
-      await checkDesign(true);
-      setBusy(null); toast('✨ Готово: ' + SRef.current.inserts.length + ' вставок', true, 4000); seek(0);
+      let st = SRef.current, an = st.an;
+      if (!an) {
+        setBusy({t: 'Gemini смотрит ролик…', s: 'Готовлю кадры', p: 0});
+        const frames = await grabFrames(url, dur, (i, n) => setBusy({t: 'Gemini смотрит ролик…', s: 'Кадры: ' + i + ' из ' + n, p: i / n * 0.15}));
+        setBusy({t: 'Gemini слушает ролик…', s: 'Достаю звук', p: 0.18});
+        const wav = await audioWav(file);
+        if (wav.size > 14e6) throw new Error('ролик слишком длинный, до 5 минут');
+        const parts = [{mime: 'audio/wav', data: await b64(wav)}];
+        for (const f of frames) { parts.push({text: 'кадр t=' + f.t.toFixed(1) + ' с'}); parts.push({mime: 'image/jpeg', data: f.data}); }
+        setBusy({t: 'Gemini разбирает речь и сцены…', s: 'Субтитры, лицо, предметы, стиль', p: 0.22});
+        an = parseJSON(await askAI(ANALYZE_PROMPT(dur, frames) + STYLE_PICK(stylesRef.current), parts, 0.2));
+        const words = (an.words || []).filter((w) => w && w.w && isFinite(w.s)).map((w) => ({w: String(w.w), s: +w.s, e: isFinite(w.e) && w.e > w.s ? +w.e : +w.s + 0.3})).sort((a, b) => a.s - b.s);
+        const faces = (an.faces || []).filter((f) => f && [f.t, f.x, f.y, f.w, f.h].every(isFinite)).map((f) => ({t: +f.t, x: +f.x, y: +f.y, w: +f.w, h: +f.h}));
+        st = {...st, words, faces, keep: (an.keep || []).filter((k) => isFinite(k.s) && isFinite(k.e)).map((k) => ({s: +k.s, e: +k.e})), title: an.title || '', an, inserts: [], cuts: []};
+        update((s) => Object.assign(s, {words: st.words, faces: st.faces, keep: st.keep, title: st.title, an, inserts: [], cuts: []}), false);
+      }
+      const styleId = forceStyle || (stylesRef.current.some((x) => x.id == an.style) ? an.style : (stylesRef.current[0] || {}).id);
+      const res = await buildOverlay({...st, dur}, an, styleId, (t, round, i) => setBusy((b) => ({t: t || (b && b.t) || 'Claude рисует…', s: round ? 'Правка по замечаниям проверки' : 'Один вызов на весь ролик, обычно 1-2 минуты' + (i != null ? ' · ' + i * 3 + ' с' : ''), p: Math.min(0.95, 0.3 + (round || 0) * 0.2 + (i || 0) * 0.004)})));
+      update((s) => { s.overlay = res.overlay; s.soundUrl = res.soundUrl; s.styleId = styleId; }, false);
+      setBusy(null); toast('✨ Готово: стиль «' + (stylesRef.current.find((x) => x.id == styleId)?.name || styleId) + '»', true, 4000); seek(0);
     } catch (e) { setBusy(null); toast('Ошибка: ' + e.message, false, 7000); console.error(e); }
   }
-  // Claude смотрит готовые кадры и правит
-  async function checkDesign(auto) {
-    const S0 = SRef.current, R0 = derive(S0);
-    if (!R0.inserts.length) return;
+  async function checkDesign() {
+    const st = SRef.current, ov = st.overlay; if (!ov) return toast('Сначала смонтируй ролик');
+    let chk; try { chk = selfCheck(makeK(ov.brief), compile(ov.lib, ov.code), st.dur); } catch (e) { chk = {error: String(e.message || e), issues: []}; }
+    const problems = [chk.error, ...(chk.issues || [])].filter(Boolean);
+    if (!problems.length) return toast('✅ Проверка: лицо не закрыто, ничего не вылезает', true, 4000);
+    await editCode('Проверка кадров нашла замечания:\n- ' + problems.join('\n- ') + '\nИсправь.');
+  }
+  // правка кода графики (Sonnet), с проверкой
+  async function editCode(ask) {
+    const st = SRef.current, ov = st.overlay;
+    setBusy({t: 'Claude правит графику…', s: ask.slice(0, 80), p: 0.3});
     try {
-      const {renderStillOnWeb} = await import('@remotion/web-renderer');
-      const shots = [];
-      const comp = {id: 'montage', component: Montage, durationInFrames: Math.max(1, Math.round(R0.outDur * FPS)), fps: FPS, width: 1080, height: 1920};
-      const props = {src: S0.src, segs: R0.segs, inserts: R0.inserts, chunks: R0.chunks, subStyle: S0.subStyle, jumpZoom: S0.jumpZoom, outDur: R0.outDur, theme: S0.theme};
-      for (let i = 0; i < R0.inserts.length && i < 16; i++) {
-        const n = R0.inserts[i];
-        setBusy({t: 'Claude проверяет результат…', s: 'Рендерю кадры: ' + (i + 1) + ' из ' + Math.min(16, R0.inserts.length), p: 0.72 + i / R0.inserts.length * 0.1});
-        const fr = Math.min(Math.round((n.o + Math.min(n.d * 0.6, 1.3)) * FPS), Math.round(R0.outDur * FPS) - 1);
-        const res = await renderStillOnWeb({composition: comp, inputProps: props, frame: fr, scale: 0.4});
-        const blob = await res.blob({format: 'jpeg', quality: 0.75});
-        shots.push({id: n.id, data: await b64(blob)});
+      const msgs = [{role: 'user', content: briefText(st, st.an)}, {role: 'assistant', content: '```js\n' + ov.code + '\n```'}, {role: 'user', content: 'Правка: ' + ask + '\nПришли исправленный код целиком одним блоком ```js.'}];
+      let code = null;
+      for (let round = 0; round < 2; round++) {
+        const txt = await askClaudeChat({system: ov.sys, messages: msgs, model: 'claude-sonnet-5-5', max_tokens: 20000}, (i) => setBusy({t: 'Claude правит графику…', s: ask.slice(0, 80) + ' · ' + i * 3 + ' с', p: Math.min(0.9, 0.3 + i * 0.01)}));
+        const c = extractCode(txt); if (!c) break; code = c; msgs.push({role: 'assistant', content: txt});
+        let chk; try { chk = selfCheck(makeK(ov.brief), compile(ov.lib, code), st.dur); } catch (e) { chk = {error: String(e.message || e), issues: []}; }
+        const problems = [chk.error, ...(chk.issues || [])].filter(Boolean);
+        if (!problems.length) break;
+        msgs.push({role: 'user', content: 'Проверка кадров нашла замечания:\n- ' + problems.join('\n- ') + '\nИсправь и пришли код целиком.'});
       }
-      setBusy({t: 'Claude проверяет результат…', s: 'Смотрит каждую вставку и исправляет', p: 0.85});
-      const design = R0.inserts.map((n) => ({id: n.id, t_out: +n.o.toFixed(2), ...strip(n)}));
-      const j = parseJSON(await askClaude(CHECK_PROMPT(design, shots), shots.map((s) => ({mime: 'image/jpeg', data: s.data})), (i) => setBusy({t: 'Claude проверяет результат…', s: 'Смотрит каждую вставку и исправляет · ' + (i * 3) + ' с', p: Math.min(0.97, 0.85 + i * 0.003)})));
-      if ((j.ops || []).length) update((s) => {
-        for (const o of j.ops) {
-          if (o.op == 'del') s.inserts = s.inserts.filter((x) => x.id != o.id);
-          if (o.op == 'set') { const i = s.inserts.findIndex((x) => x.id == o.id); if (i >= 0) { const n = s.inserts[i]; const c = cleanIns({...strip(n), ...o, t: isFinite(o.t_out) ? mapSrc(R0.segs, o.t_out) : n.t}, n.t, s.dur); s.inserts = s.inserts.map((x, k) => k == i ? {...c, id: n.id} : x); } }
-        }
-      }, !auto);
-      if (!auto) { setBusy(null); toast('🎨 ' + (j.notes || 'Проверено'), true, 5000); }
-    } catch (e) { if (!auto) { setBusy(null); toast('Проверка не удалась: ' + e.message, false, 6000); } console.error(e); }
+      if (!code) throw new Error('Claude не прислал код');
+      let soundUrl = null; try { soundUrl = makeSoundWav(compile(ov.lib, code), makeK(ov.brief), st.dur); } catch (e) {}
+      update((s) => { s.overlay = {...ov, code}; s.soundUrl = soundUrl; });
+      setBusy(null); toast('✅ Готово', true);
+    } catch (e) { setBusy(null); toast('Не вышло: ' + e.message, false, 6000); }
   }
 
   // ===== кадр для ИИ =====
@@ -175,70 +228,12 @@ export default function App() {
   async function run(text) {
     text = (text || '').trim(); if (!text) return; setCmd('');
     if (!S.src) return toast('Сначала загрузи видео');
-    toast('🤖 Claude думает над правкой…', true, 90000);
-    try {
-      const srcNow = mapSrc(R.segs, T);
-      const plan = {title: S.title, duration_out: +R.outDur.toFixed(2), playhead_out: +T.toFixed(2), selected_id: selId, removePauses: S.removePauses, jumpZoom: S.jumpZoom, subStyle: S.subStyle,
-        inserts: R.inserts.map((n) => ({id: n.id, t_out: +n.o.toFixed(2), ...strip(n)})), words: R.words.map((w) => w.w + '@' + w.os.toFixed(2)).join(' ')};
-      const img = await frameAt(srcNow);
-      const prompt = `Ты сильный монтажёр и моушн-дизайнер вертикальных рилсов. Фирменный стиль ролика: ${JSON.stringify(S.theme)}. Держи его. Пользователь просит правку: "${text}".
-Текущий монтаж (время в секундах готового ролика, кадр в момент playhead приложен): ${JSON.stringify(plan)}
-Лицо в кадре сейчас (не закрывать, тексты ниже лица, над субтитрами): ${JSON.stringify(faceAt(S.faces, srcNow))}
-${GFX_DOC}
-Стили субтитров: ${SUB_KEYS.join(', ')}.
-Пойми, чего человек хочет, и сделай это на уровне хорошего монтажёра, по смыслу ролика. Новые вставки придумывай уникальные, про то, что говорится и видно.
-Верни ТОЛЬКО JSON {"ops":[...],"say":"коротко по-русски, что сделал"} где op:
-{"op":"add","t_out":сек, ...поля вставки}
-{"op":"set","id":..,"t_out":.., ...любые поля вставки}  (layers заменяются целиком)
-{"op":"del","id":..}
-{"op":"cut","from":сек,"to":сек}
-{"op":"pauses","on":true|false}
-{"op":"zoom","on":true|false}
-{"op":"sub","style":..}
-{"op":"undo"}`;
-      const j = parseJSON(await askClaude(prompt, img ? [{mime: 'image/jpeg', data: img}] : []));
-      if ((j.ops || []).some((o) => o.op == 'undo')) { undo(); }
-      let changed = null;
-      update((s) => {
-        s.inserts = s.inserts.map((n) => ({...n}));
-        for (const o of j.ops || []) {
-          if (o.op == 'add') { const n = cleanIns({...o, t: mapSrc(R.segs, isFinite(o.t_out) ? o.t_out : T)}, 0, s.dur); n.id = uid++; s.inserts.push(n); changed = n.id; }
-          if (o.op == 'del') s.inserts = s.inserts.filter((x) => x.id != o.id);
-          if (o.op == 'set') { const i = s.inserts.findIndex((x) => x.id == o.id); if (i >= 0) { const n = s.inserts[i]; const c = cleanIns({...strip(n), ...o, t: isFinite(o.t_out) ? mapSrc(R.segs, o.t_out) : n.t}, n.t, s.dur); s.inserts[i] = {...c, id: n.id}; changed = n.id; } }
-          if (o.op == 'cut' && isFinite(o.from) && isFinite(o.to) && o.to > o.from) s.cuts = [...s.cuts, {s: mapSrc(R.segs, o.from), e: mapSrc(R.segs, o.to)}];
-          if (o.op == 'pauses') s.removePauses = !!o.on;
-          if (o.op == 'zoom') s.jumpZoom = !!o.on;
-          if (o.op == 'sub' && SUBS[o.style]) s.subStyle = o.style;
-        }
-      });
-      if (changed) { setSelId(changed); setMode('ins'); }
-      toast('🤖 ' + (j.say || 'Готово'), true, 4500);
-    } catch (e) { toast('ИИ не ответил: ' + e.message, false, 5000); }
+    const t = norm(text);
+    if (/пауз/.test(t) && !/графи|плашк|текст/.test(t)) { const on = !/(верн|не выреза)/.test(t); update((s) => { s.removePauses = on; }); return toast(on ? '✂ Паузы вырезаны' : '↔ Паузы вернул', true); }
+    if (/(отмен|как было)/.test(t)) return undo();
+    if (!S.overlay) return toast('Сначала дождись монтажа');
+    await editCode(text + ` (сейчас на экране момент ${mapSrc(R.segs, T).toFixed(1)} с исходного видео)`);
   }
-
-  // ===== варианты вставки =====
-  const [vars, setVars] = useState({});
-  async function moreIdeas(n) {
-    setVars((v) => ({...v, [n.id]: {...(v[n.id] || {list: [strip(n)], i: 0}), loading: true}}));
-    try {
-      const img = await frameAt(n.t);
-      const prompt = `Ты сильный моушн-дизайнер вертикальных рилсов. В этот момент ролика (${n.o.toFixed(1)} с) звучит: "${ctxAround(n.o)}". Кадр приложен. Лицо в кадре (не закрывать): ${JSON.stringify(faceAt(S.faces, n.t))}. Название ролика: "${S.title}". Фирменный стиль ролика (держи его): ${JSON.stringify(S.theme)}.
-Сейчас здесь вставка: ${JSON.stringify(strip(n))}.
-Придумай 3 СОВСЕМ РАЗНЫХ новых варианта вставки на этот же момент: другая идея, другой смысл, другая композиция и анимация. Каждая по смыслу именно про то, что здесь говорят и видно, с юмором или пользой, не общие слова. Тексты по-русски, коротко. Тексты ниже лица, над субтитрами.
-${GFX_DOC}
-Верни ТОЛЬКО JSON {"variants":[вставка,вставка,вставка]} (t не нужен).`;
-      const j = parseJSON(await askClaude(prompt, img ? [{mime: 'image/jpeg', data: img}] : []));
-      setVars((v) => { const cur = v[n.id] || {list: [strip(n)], i: 0}; const list = [...cur.list, ...(j.variants || []).map((x) => strip(cleanIns(x, n.t, S.dur)))]; return {...v, [n.id]: {list, i: cur.i, loading: false}}; });
-      toast('✨ Новые идеи: листай', true);
-    } catch (e) { setVars((v) => ({...v, [n.id]: {...v[n.id], loading: false}})); toast('ИИ не ответил: ' + e.message, false, 5000); }
-  }
-  function applyVar(n, i) {
-    const V = vars[n.id]; if (!V) return; const spec = V.list[i];
-    setVars((v) => ({...v, [n.id]: {...V, i}}));
-    update((s) => { s.inserts = s.inserts.map((x) => x.id == n.id ? {...x, ...JSON.parse(JSON.stringify(spec))} : x); });
-    setTimeout(() => previewIns(n), 50);
-  }
-
   // ===== экспорт =====
   async function exportMp4() {
     try {
@@ -247,7 +242,7 @@ ${GFX_DOC}
       const scale = q == 1080 ? 1 : 720 / 1080;
       const res = await renderMediaOnWeb({
         composition: {id: 'montage', component: Montage, durationInFrames: Math.max(1, Math.round(R.outDur * FPS)), fps: FPS, width: 1080, height: 1920},
-        inputProps: {src: S.src, segs: R.segs, inserts: R.inserts, chunks: R.chunks, subStyle: S.subStyle, jumpZoom: S.jumpZoom, outDur: R.outDur, theme: S.theme},
+        inputProps: {src: S.src, segs: R.segs, inserts: R.inserts, chunks: R.chunks, subStyle: S.subStyle, jumpZoom: S.jumpZoom, outDur: R.outDur, theme: S.theme, overlay: S.overlay, soundUrl: S.soundUrl},
         container: 'mp4', videoCodec: 'h264', scale, videoBitrate: 'high',
         onProgress: (p) => setBusy({t: 'Собираю MP4…', s: Math.round(p.progress * 100) + '% · не выключайте экран', p: p.progress}),
       });
@@ -285,7 +280,7 @@ ${GFX_DOC}
   function Panel() {
     if (!S.src) return <div className="hint" style={{fontSize: 14}}>Нажми «＋ Своё видео» вверху. ИИ посмотрит ролик и смонтирует его со своими вставками.</div>;
     if (mode == 'mont') return <>
-      <div className="row" style={{flexWrap: 'nowrap', overflowX: 'auto'}}><Tog on={S.removePauses} label="Паузы" onClick={() => update((s) => { s.removePauses = !s.removePauses; })}/><Tog on={S.jumpZoom} label="Зум" onClick={() => update((s) => { s.jumpZoom = !s.jumpZoom; })}/><button className="btn" style={{whiteSpace: 'nowrap'}} onClick={() => S.file && analyze(S.file, S.src, S.dur)}>✨ Заново</button><button className="btn" style={{whiteSpace: 'nowrap'}} onClick={() => checkDesign(false)}>🎨 Проверить</button><button className="btn" onClick={undo}>↩</button></div>
+      <div className="row" style={{flexWrap: 'nowrap', overflowX: 'auto'}}><Tog on={S.removePauses} label="Паузы" onClick={() => update((s) => { s.removePauses = !s.removePauses; })}/><Tog on={S.jumpZoom} label="Зум" onClick={() => update((s) => { s.jumpZoom = !s.jumpZoom; })}/><button className="btn" style={{whiteSpace: 'nowrap'}} onClick={() => S.file && analyze(S.file, S.src, S.dur, S.styleId)}>✨ Заново</button><button className="btn" style={{whiteSpace: 'nowrap'}} onClick={() => checkDesign()}>🎨 Проверить</button><button className="btn" onClick={undo}>↩</button></div>
     </>;
     if (mode == 'sub') {
       const list = only && likedSub.length ? SUB_KEYS.filter((k) => likedSub.includes(k)) : SUB_KEYS;
@@ -298,22 +293,14 @@ ${GFX_DOC}
       </>;
     }
     if (mode == 'ins') {
-      const n = sel || nearest();
-      if (!n) return <><div className="hint">Вставок пока нет.</div><button className="btn lime" style={{marginTop: 8}} onClick={() => run('придумай и добавь здесь вставку по смыслу этого момента')}>✨ ИИ, придумай вставку здесь</button></>;
-      const V = vars[n.id] || {list: [strip(n)], i: 0};
-      const go = (d) => { if (V.list.length < 2) { if (d > 0) moreIdeas(n); return; } applyVar(n, (V.i + d + V.list.length) % V.list.length); };
-      const k = R.inserts.indexOf(n);
-      const texts = (n.layers || []).map((L, j) => L.k == 'text' ? j : -1).filter((j) => j >= 0).slice(0, 2);
+      if (!styles.length) return <div className="hint">Загружаю стили…</div>;
+      const cur = Math.max(0, styles.findIndex((x) => x.id == (pickStyle || S.styleId)));
+      const st = styles[cur];
+      const go = (d) => setPickStyle(styles[(cur + d + styles.length) % styles.length].id);
       return <>
-        <div className="vhead"><span>ВСТАВКА {k + 1}/{R.inserts.length} · ВАРИАНТ {V.i + 1} ИЗ {V.list.length}{V.loading ? ' · ИИ придумывает…' : ''}</span></div>
-        <Swipe go={go}><div className="nm" key={n.id + ':' + V.i} style={{fontSize: 16, padding: '0 44px', textAlign: 'center'}}><span className="e">{n.icon}</span>{n.idea || 'вставка'}</div></Swipe>
-        <div className="row" style={{marginTop: 4}}>{texts.map((j) => <input key={n.id + ':' + j} className="fld" style={{flex: 1}} defaultValue={String(n.layers[j].text || '').replace(/\n/g, ' / ')} onChange={(e) => { const val = e.target.value.replace(/\s*\/\s*/g, '\n'); update((s) => { s.inserts = s.inserts.map((x) => x.id == n.id ? {...x, layers: x.layers.map((L, li) => li == j ? {...L, text: val} : L)} : x); }, false); }}/>)}
-          <button className="btn" onClick={() => selectIns(R.inserts[(k - 1 + R.inserts.length) % R.inserts.length].id)}>◀</button>
-          <button className="btn" onClick={() => moreIdeas(n)}>✨ Идеи</button>
-          <button className="btn" onClick={() => { update((s) => { s.inserts = s.inserts.filter((x) => x.id != n.id); }); setSelId(null); toast('🗑 Вставка убрана'); }}>🗑</button>
-          <button className="btn" onClick={() => selectIns(R.inserts[(k + 1) % R.inserts.length].id)}>▶</button>
-        </div>
-        <div className="dots">{V.list.map((x, j) => <i key={j} className={j == V.i ? 'on' : ''}></i>)}</div>
+        <div className="vhead"><span>СТИЛЬ {cur + 1} ИЗ {styles.length}{st.id == S.styleId ? ' · СЕЙЧАС' : ''}</span></div>
+        <Swipe go={go}><div className="nm" key={st.id} style={{fontSize: 14, padding: '0 38px', textAlign: 'center', flexDirection: 'column', gap: 0}}><b>{st.name}</b><span style={{fontSize: 10, fontWeight: 500, color: '#999', lineHeight: 1.2}}>{String(st.desc || '').split(':')[0].slice(0, 70)}</span></div></Swipe>
+        <div className="row" style={{marginTop: 4}}><button className="btn lime" style={{flex: 1}} disabled={st.id == S.styleId && !!S.overlay} onClick={() => S.file && analyze(S.file, S.src, S.dur, st.id)}>🎨 Сделать в этом стиле</button></div>
       </>;
     }
     if (mode == 'exp') return <>
@@ -328,7 +315,7 @@ ${GFX_DOC}
     <header><h1>VIDEO<b>.</b></h1><button className="btn lime" onClick={() => fileRef.current.click()}>＋ Своё видео</button><input ref={fileRef} type="file" accept="video/*" style={{position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none'}} onChange={onFile}/></header>
     <div id="stage">
       <div id="playerBox">
-        {S.src ? <Player ref={player} component={Montage} inputProps={{src: S.src, segs: R.segs, inserts: R.inserts, chunks: R.chunks, subStyle: S.subStyle, jumpZoom: S.jumpZoom, outDur: R.outDur, theme: S.theme}}
+        {S.src ? <Player ref={player} component={Montage} inputProps={{src: S.src, segs: R.segs, inserts: R.inserts, chunks: R.chunks, subStyle: S.subStyle, jumpZoom: S.jumpZoom, outDur: R.outDur, theme: S.theme, overlay: S.overlay, soundUrl: S.soundUrl}}
           durationInFrames={durF} fps={FPS} compositionWidth={1080} compositionHeight={1920} style={{width: '100%', height: '100%'}} clickToPlay controls={false} acknowledgeRemotionLicense/>
           : <div className="empty"><b>Загрузи видео</b>кнопкой «＋ Своё видео» вверху</div>}
         {S.src ? <div style={{position: 'absolute', inset: 0}} onClick={() => { const p = player.current; if (p) p.toggle(); }}/> : null}
@@ -341,7 +328,7 @@ ${GFX_DOC}
       <div id="ph" style={{left: 8 + (lineRef.current ? lineRef.current.clientWidth : 0) * clamp(T / (R.outDur || 1)) + 'px'}}></div>
       <div id="tinfo"><span>{fmt(T)}</span><span>{fmt(R.outDur)}{R.outDur < S.dur - 0.05 ? '  (было ' + fmt(S.dur) + ')' : ''}</span></div>
     </div>
-    <div id="modes">{[['mont', '✂ Монтаж'], ['ins', '✨ Вставки'], ['sub', '💬 Субтитры'], ['exp', '⬇ MP4']].map(([m, l]) => <button key={m} className={'md' + (mode == m ? ' on' : '')} onClick={() => setMode(m)}>{l}</button>)}</div>
+    <div id="modes">{[['mont', '✂ Монтаж'], ['ins', '🎨 Стиль'], ['sub', '💬 Субтитры'], ['exp', '⬇ MP4']].map(([m, l]) => <button key={m} className={'md' + (mode == m ? ' on' : '')} onClick={() => setMode(m)}>{l}</button>)}</div>
     <div id="panel">{Panel()}</div>
     <div id="voice">
       <input id="cmd" placeholder="Скажи или напиши правку…" enterKeyHint="send" autoComplete="off" value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => { if (e.key == 'Enter') run(cmd); }}/>

@@ -1,6 +1,7 @@
 import React from 'react';
 import {AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig, spring, interpolate} from 'remotion';
 import {Video, Audio} from '@remotion/media';
+import {makeK, compile, drawFrame} from './overlay.js';
 
 export const FPS = 30;
 const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
@@ -164,6 +165,23 @@ function Insert({n, src}) {
   </AbsoluteFill>;
 }
 
+// ===== графика от Claude поверх видео (время исходника) =====
+const compiled = new Map();
+function getOverlay(ov) {
+  if (!ov || !ov.code) return null;
+  const key = ov.code.length + ':' + ov.code.slice(-200) + ':' + (ov.lib || '').length;
+  let c = compiled.get(key);
+  if (!c) { try { c = {fns: compile(ov.lib, ov.code), rt: makeK(ov.brief)}; } catch (e) { c = {err: String(e && e.message || e)}; } compiled.set(key, c); }
+  return c;
+}
+function Overlay({ov, srcT}) {
+  const ref = React.useRef(null);
+  const c = getOverlay(ov);
+  React.useLayoutEffect(() => { const cv = ref.current; if (!cv || !c || !c.fns) return; drawFrame(cv.getContext('2d'), c.rt, c.fns, srcT); });
+  if (!c || !c.fns) return null;
+  return <canvas ref={ref} width={1080} height={1920} style={{position: 'absolute', left: 0, top: 0, width: 1080, height: 1920}}/>;
+}
+
 // ===== субтитры =====
 const SUB_FONT = {fontFamily: FONTS.b, fontWeight: 900};
 function Subs({chunks, style, theme = {}}) {
@@ -196,21 +214,24 @@ function camAt(T, segIdx, inserts, jumpZoom) {
   return {z, x, y};
 }
 
-export const Montage = ({src, segs = [], inserts = [], chunks = [], subStyle = 'karaoke', jumpZoom = true, outDur = 1, theme = {}}) => {
+export const Montage = ({src, segs = [], inserts = [], chunks = [], subStyle = 'karaoke', jumpZoom = true, outDur = 1, theme = {}, overlay = null, soundUrl = null}) => {
   const f = useCurrentFrame(), {fps} = useVideoConfig(), T = f / fps;
   let segIdx = 0; segs.forEach((g, i) => { if (T >= g.o) segIdx = i; });
   const cam = camAt(T, segIdx, inserts, jumpZoom);
+  const g0 = segs[segIdx]; const srcT = g0 ? g0.s + Math.max(0, Math.min(T - g0.o, g0.e - g0.s)) : T;
   return <AbsoluteFill style={{background: '#000', overflow: 'hidden'}}>
     <AbsoluteFill style={{transform: `translate(${cam.x}px,${cam.y}px) scale(${cam.z})`, transformOrigin: '540px 800px'}}>
       {src ? segs.map((g, i) => <Sequence key={i + ':' + g.s} from={Math.round(g.o * fps)} durationInFrames={Math.max(1, Math.round((g.e - g.s) * fps))} premountFor={15}>
         <Video src={src} trimBefore={Math.round(g.s * fps)} objectFit="cover" style={{width: '100%', height: '100%'}}/>
       </Sequence>) : null}
     </AbsoluteFill>
+    <Overlay ov={overlay} srcT={srcT}/>
     <Subs chunks={chunks} style={subStyle} theme={theme}/>
     {inserts.map((n) => <Sequence key={n.id} from={Math.round(n.o * fps)} durationInFrames={Math.max(1, Math.round(n.d * fps))} layout="none">
       <Insert n={n} src={src}/>
       {n.sfx == 'pop' || n.sfx == 'thud' ? <Audio src={n.sfx == 'pop' ? 'a/pop.wav' : 'a/thud.wav'} volume={n.sfx == 'thud' ? 0.35 : 0.22}/> : null}
     </Sequence>)}
+    {soundUrl ? segs.map((g, i) => <Sequence key={'sfx' + i + ':' + g.s} from={Math.round(g.o * fps)} durationInFrames={Math.max(1, Math.round((g.e - g.s) * fps))}><Audio src={soundUrl} trimBefore={Math.round(g.s * fps)}/></Sequence>) : null}
     <div style={{position: 'absolute', left: 0, top: 0, height: 10, width: `${clamp(T / outDur) * 100}%`, background: theme.accent || '#FFD43B'}}/>
   </AbsoluteFill>;
 };
