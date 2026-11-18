@@ -89,9 +89,18 @@ export function makeK(brief) {
     const s = subs[i] || {t0: 0, t1: brief.duration, text: ''};
     return {i, text: s.text, t0: s.t0, t1: s.t1, p: clamp((t - s.t0) / Math.max(0.01, s.t1 - s.t0))};
   }
-  function face(t) {
+  function rawFace(t) {
     let b = null, bd = 1e9; for (const f of brief.faces || []) { const d = Math.abs(f.t - t); if (d < bd) { bd = d; b = f; } }
     return b && bd < 1.5 ? {x: b.x, y: b.y, w: b.w, h: b.h} : null;
+  }
+  // раскладка «панель сверху, человек снизу»: layout(t) из кода стиля → 0…1
+  let layoutFn = null;
+  const TY = splitShift(brief.faces);
+  function split(t) { if (!layoutFn) return 0; try { return clamp(+layoutFn(t, K) || 0); } catch (e) { return 0; } }
+  function face(t) {
+    const f = rawFace(t); if (!f) return null;
+    const s = split(t); if (!s) return f;
+    return {x: f.x, y: f.y + TY * s, w: f.w, h: f.h};
   }
   const K = {
     W, H, SAFE, text, path, card, emoji, sub, face, ease, clamp, rand,
@@ -104,17 +113,27 @@ export function makeK(brief) {
     title: brief.title || '', emojiMain: '', duration: brief.duration, subs: brief.subs || [], words: brief.words || [],
     when: (q, n, d) => vtWhen(brief.words || [], q, n, d),
   };
+  K.split = split; K.splitY = 960;
   return {
     K,
+    setLayout(fn) { layoutFn = typeof fn === 'function' ? fn : null; },
+    split, ty: TY,
     bind(ctx) { g = ctx; },
     begin(t) { boxes = []; curT = t; },
     boxes: () => boxes,
   };
 }
 
-// компиляция: библиотека стиля + код Claude → {draw, sound}
+// сдвиг видео вниз в режиме панели: лицо встаёт примерно в y≈1330 (нижняя половина кадра)
+export function splitShift(faces) {
+  const ys = (faces || []).map((f) => f.y + f.h / 2).filter(isFinite).sort((a, b) => a - b);
+  const cy = ys.length ? ys[ys.length >> 1] : 760;
+  return clamp(1330 - cy, 0, 960);
+}
+
+// компиляция: библиотека стиля + код Claude → {draw, sound, layout}
 export function compile(lib, code) {
-  const src = (lib || '') + '\n\n' + code + "\n;return { draw: typeof draw === 'function' ? draw : null, sound: typeof sound === 'function' ? sound : null };";
+  const src = (lib || '') + '\n\n' + code + "\n;return { draw: typeof draw === 'function' ? draw : null, sound: typeof sound === 'function' ? sound : null, layout: typeof layout === 'function' ? layout : null };";
   const fns = new Function(src)();
   if (!fns.draw) throw new Error('в коде нет функции draw(t, k)');
   return fns;
@@ -134,6 +153,7 @@ export function drawFrame(ctx, rt, fns, t) {
 
 // самопроверка без затрат: вылезает ли за край, налезает ли, закрывает ли лицо, ошибки кода
 export function selfCheck(rt, fns, duration) {
+  rt.setLayout(fns.layout);
   const c = document.createElement('canvas'); c.width = W; c.height = H; const ctx = c.getContext('2d');
   const issues = new Set(); let err = null; let ms = 0;
   const N = Math.max(8, Math.min(40, Math.round(duration * 1.5)));

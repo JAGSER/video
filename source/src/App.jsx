@@ -8,7 +8,7 @@ const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
 const fmt = (t) => { t = Math.max(0, t); return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0'); };
 const norm = (s) => String(s).toLowerCase().replace(/ё/g, 'е');
 const LS = {get: (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }};
-const SUBS = {karaoke: {n: 'Караоке жёлтым', e: '🟨'}, pop: {n: 'По слову с прыжком', e: '🔤'}, type: {n: 'Печать на плашке', e: '⌨️'}, neon: {n: 'Неон', e: '🌈'}, wave: {n: 'Волна', e: '〰️'}, off: {n: 'Без субтитров', e: '🚫'}};
+const SUBS = {steps: {n: 'Как в «Шагах»', e: '🟧'}, karaoke: {n: 'Караоке жёлтым', e: '🟨'}, pop: {n: 'По слову с прыжком', e: '🔤'}, type: {n: 'Печать на плашке', e: '⌨️'}, neon: {n: 'Неон', e: '🌈'}, wave: {n: 'Волна', e: '〰️'}, off: {n: 'Без субтитров', e: '🚫'}};
 const SUB_KEYS = Object.keys(SUBS);
 let uid = 1;
 
@@ -69,7 +69,7 @@ function derive(S) {
 function mapSrc(segs, T) { for (let i = 0; i < segs.length; i++) { const g = segs[i]; if (T < g.o + (g.e - g.s) || i == segs.length - 1) return g.s + clamp(T - g.o, 0, g.e - g.s); } return 0; }
 
 export default function App() {
-  const [S, setS] = useState({dur: 0, words: [], keep: [], inserts: [], cuts: [], faces: [], subStyle: 'karaoke', removePauses: false, jumpZoom: true, title: '', src: null, theme: {}, an: null, overlay: null, soundUrl: null, styleId: ''});
+  const [S, setS] = useState({dur: 0, words: [], keep: [], inserts: [], cuts: [], faces: [], subStyle: 'karaoke', removePauses: true, jumpZoom: true, title: '', src: null, theme: {}, an: null, overlay: null, soundUrl: null, styleId: ''});
   const SRef = useRef(S); SRef.current = S;
   const hist = useRef([]);
   const fileRef = useRef(null);
@@ -103,9 +103,10 @@ export default function App() {
     const dur = await new Promise((res) => { const v = document.createElement('video'); v.preload = 'metadata'; v.onloadedmetadata = () => res(v.duration); v.onerror = () => res(0); v.src = url; });
     if (!dur) return toast('Видео не открылось');
     hist.current = [];
-    setS({dur, words: [], keep: [], inserts: [], cuts: [], faces: [], subStyle: SRef.current.subStyle, removePauses: false, jumpZoom: true, title: '', src: url, file, theme: {}, an: null, overlay: null, soundUrl: null, styleId: ''});
+    setS({dur, words: [], keep: [], inserts: [], cuts: [], faces: [], subStyle: SRef.current.subStyle, removePauses: true, jumpZoom: true, title: '', src: url, file, theme: {}, an: null, overlay: null, soundUrl: null, styleId: ''});
     analyze(file, url, dur);
   }
+  useEffect(() => { try { ['700 40px InterBold', '900 40px InterBlack', 'italic 400 40px LoraI'].forEach((f) => document.fonts.load(f)); } catch (e) {} }, []);
   // ===== стили «Помощника» =====
   const [styles, setStyles] = useState([]);
   useEffect(() => { const base = [{id: 'std', name: 'Стандартный', desc: 'Основной стиль «Помощника»: светлые плашки, рисунки линией, терракотовый акцент'}]; fetch('styles/index.json').then((r) => r.json()).then((a) => setStyles(base.concat(a.filter((x) => x && x.id)))).catch(() => setStyles(base)); }, []);
@@ -115,7 +116,7 @@ export default function App() {
     const getF = async (f) => { const r = await fetch(`styles/${encodeURIComponent(id)}/${f}`); if (!r.ok) throw new Error(f + ': ' + r.status); return r.text(); };
     const [lib, doc, ex] = await Promise.all([getF('lib.js'), getF('doc.md'), getF('example.js').catch(() => '')]);
     const m = lib.match(/(?:^|\n)\s*(?:const|var|let)\s+([A-Za-z_$][\w$]*)\s*=/); const konst = m ? m[1] : 'стиля';
-    return {id, lib, konst, sys: OVERLAY_PROMPT + '\n\n' + styleRules(konst) + doc, example: ex};
+    return {id, lib, konst, sys: OVERLAY_PROMPT + '\n\n' + styleRules(konst, doc) + doc, example: ex};
   }
   function makeBrief(st) {
     const words = st.words.map((w) => ({w: w.w, t0: w.s, t1: w.e}));
@@ -138,7 +139,8 @@ ${subs}
   async function buildOverlay(st, an, styleId, note) {
     const style = await loadStyle(styleId);
     const FENCE = '```';
-    const intro = style.example ? 'ПРИМЕР ЭТОГО СТИЛЯ (полноэкранный ролик на другую тему; изучи язык стиля, но фон и рамку кадра не рисуй):\n' + FENCE + 'js\n' + style.example + '\n' + FENCE + '\n\n' : '';
+    const panel = /РЕЖИМ: ПАНЕЛЬ/.test(style.sys);
+    const intro = style.example ? (panel ? 'ПРИМЕР ЭТОГО СТИЛЯ (монтаж поверх другого ролика на другую тему; повторяй приёмы, раскладку и язык стиля, а тексты, шаги и предметы бери из своего ролика):\n' : 'ПРИМЕР ЭТОГО СТИЛЯ (полноэкранный ролик на другую тему; изучи язык стиля, но фон и рамку кадра не рисуй):\n') + FENCE + 'js\n' + style.example + '\n' + FENCE + '\n\n' : '';
     const msgs = [{role: 'user', content: intro + briefText(st, an)}];
     const brief = makeBrief(st);
     let code = null, model = 'claude-opus-5-5';
@@ -176,11 +178,14 @@ ${subs}
         const words = (an.words || []).filter((w) => w && w.w && isFinite(w.s)).map((w) => ({w: String(w.w), s: +w.s, e: isFinite(w.e) && w.e > w.s ? +w.e : +w.s + 0.3})).sort((a, b) => a.s - b.s);
         const faces = (an.faces || []).filter((f) => f && [f.t, f.x, f.y, f.w, f.h].every(isFinite)).map((f) => ({t: +f.t, x: +f.x, y: +f.y, w: +f.w, h: +f.h}));
         st = {...st, words, faces, keep: (an.keep || []).filter((k) => isFinite(k.s) && isFinite(k.e)).map((k) => ({s: +k.s, e: +k.e})), title: an.title || '', an, inserts: [], cuts: []};
-        update((s) => Object.assign(s, {words: st.words, faces: st.faces, keep: st.keep, title: st.title, an, inserts: [], cuts: []}), false);
+        // дубли, оговорки и фальстарты вырезаются сразу, как у монтажёра (вернуть можно правкой)
+        const cuts = (an.retakes || []).filter((k) => k && isFinite(k.s) && isFinite(k.e) && k.e - k.s > 0.15 && k.e - k.s < dur * 0.5).map((k) => ({s: Math.max(0, +k.s), e: Math.min(dur, +k.e), why: String(k.why || '')}));
+        st.cuts = cuts;
+        update((s) => Object.assign(s, {words: st.words, faces: st.faces, keep: st.keep, title: st.title, an, inserts: [], cuts}), false);
       }
       const styleId = forceStyle || (stylesRef.current.some((x) => x.id == an.style) ? an.style : (stylesRef.current[0] || {}).id);
       const res = await buildOverlay({...st, dur}, an, styleId, (t, round, i) => setBusy((b) => ({t: t || (b && b.t) || 'Claude рисует…', s: round ? 'Правка по замечаниям проверки' : 'Один вызов на весь ролик, обычно 1-2 минуты' + (i != null ? ' · ' + i * 3 + ' с' : ''), p: Math.min(0.95, 0.3 + (round || 0) * 0.2 + (i || 0) * 0.004)})));
-      update((s) => { s.overlay = res.overlay; s.soundUrl = res.soundUrl; s.styleId = styleId; }, false);
+      update((s) => { s.overlay = res.overlay; s.soundUrl = res.soundUrl; if (styleId == 'steps' && s.styleId != 'steps') s.subStyle = 'steps'; s.styleId = styleId; }, false);
       setBusy(null); toast('✨ Готово: стиль «' + (stylesRef.current.find((x) => x.id == styleId)?.name || styleId) + '»', true, 4000); seek(0);
     } catch (e) { setBusy(null); toast('Ошибка: ' + e.message, false, 7000); console.error(e); }
   }
@@ -200,21 +205,44 @@ ${subs}
     const model = creative ? 'claude-opus-5-5' : 'deepseek', who = creative ? 'Claude' : 'DeepSeek';
     setBusy({t: who + ' правит графику…', s: ask.slice(0, 80), p: 0.3});
     try {
-      const msgs = [{role: 'user', content: briefText(st, st.an)}, {role: 'assistant', content: '```js\n' + ov.code + '\n```'}, {role: 'user', content: 'Правка: ' + ask + '\nПришли исправленный код целиком одним блоком ```js.'}];
-      let code = null;
+      const cutsNow = st.cuts.map((c) => `${c.s.toFixed(2)}–${c.e.toFixed(2)}${c.why ? ' (' + c.why + ')' : ''}`).join(', ') || 'нет';
+      const EDIT = `\nЕсли правка касается текста субтитров речи (слово, имя, число, опечатка) или нарезки (вырезать кусок, вернуть вырезанное), пришли ДО кода блок \`\`\`edit с JSON {"subs":[{"from":"слово как сейчас","to":"как надо"}],"cut":[{"s":сек_исходника,"e":сек}],"uncut":[{"s":сек,"e":сек}]} (время по фразам выше, это время исходника). Вырезано сейчас: ${cutsNow}. Если графику менять не нужно, код не присылай.`;
+      const msgs = [{role: 'user', content: briefText(st, st.an)}, {role: 'assistant', content: '```js\n' + ov.code + '\n```'}, {role: 'user', content: 'Правка: ' + ask + '\nПришли исправленный код целиком одним блоком ```js.' + EDIT}];
+      let code = null, edited = false;
       for (let round = 0; round < 2; round++) {
-        const txt = await askClaudeChat({system: ov.sys, messages: msgs, model: round == 0 ? model : 'deepseek', max_tokens: 20000}, (i) => setBusy({t: (round == 0 ? who : 'DeepSeek') + ' правит графику…', s: ask.slice(0, 80) + ' · ' + i * 3 + ' с', p: Math.min(0.9, 0.3 + i * 0.01)}));
+        const txt = await askClaudeChat({system: ov.sys, messages: msgs, model: round == 0 ? model : 'deepseek', max_tokens: 20000}, (i) => setBusy({t: (round == 0 ? who : 'DeepSeek') + ' правит…', s: ask.slice(0, 80) + ' · ' + i * 3 + ' с', p: Math.min(0.9, 0.3 + i * 0.01)}));
+        if (round == 0) { const e = extractEdit(txt); if (e) { applyEdit(e); edited = true; } }
         const c = extractCode(txt); if (!c) break; code = c; msgs.push({role: 'assistant', content: txt});
         let chk; try { chk = selfCheck(makeK(ov.brief), compile(ov.lib, code), st.dur); } catch (e) { chk = {error: String(e.message || e), issues: []}; }
         const problems = [chk.error, ...(chk.issues || [])].filter(Boolean);
         if (!problems.length) break;
         msgs.push({role: 'user', content: 'Проверка кадров нашла замечания:\n- ' + problems.join('\n- ') + '\nИсправь и пришли код целиком.'});
       }
+      if (!code && edited) { setBusy(null); return toast('✅ Готово', true); }
       if (!code) throw new Error('Claude не прислал код');
       let soundUrl = null; try { soundUrl = makeSoundWav(compile(ov.lib, code), makeK(ov.brief), st.dur); } catch (e) {}
       update((s) => { s.overlay = {...ov, code}; s.soundUrl = soundUrl; });
       setBusy(null); toast('✅ Готово', true);
     } catch (e) { setBusy(null); toast('Не вышло: ' + e.message, false, 6000); }
+  }
+
+  function extractEdit(t) { const m = String(t).match(/```edit\s*\n?([\s\S]*?)```/); if (!m) return null; try { return parseJSON(m[1]); } catch (e) { return null; } }
+  function applyEdit(e) {
+    update((s) => {
+      for (const r of e.subs || []) {
+        if (!r || !r.from || r.to == null) continue;
+        const fw = String(r.from).trim().split(/\s+/).map(norm), tw = String(r.to).trim().split(/\s+/).filter(Boolean);
+        for (let i = 0; i + fw.length <= s.words.length; i++) {
+          if (!fw.every((w, j) => norm(s.words[i + j].w).replace(/[.,!?…:;«»"]/g, '') == w.replace(/[.,!?…:;«»"]/g, ''))) continue;
+          const a = s.words[i], b = s.words[i + fw.length - 1], span = (b.e - a.s) / Math.max(1, tw.length);
+          const tail = (b.w.match(/[.,!?…:;]+$/) || [''])[0];
+          const rep = tw.map((w, j) => ({w: j == tw.length - 1 && tail && !/[.,!?…:;]$/.test(w) ? w + tail : w, s: a.s + span * j, e: a.s + span * (j + 1)}));
+          s.words = s.words.slice(0, i).concat(rep, s.words.slice(i + fw.length)); i += rep.length - 1;
+        }
+      }
+      for (const c of e.cut || []) if (c && isFinite(c.s) && isFinite(c.e) && c.e > c.s) s.cuts = s.cuts.concat([{s: +c.s, e: +c.e, why: 'правка'}]);
+      for (const c of e.uncut || []) if (c && isFinite(c.s) && isFinite(c.e)) s.cuts = s.cuts.filter((k) => k.e <= +c.s || k.s >= +c.e);
+    });
   }
 
   // ===== кадр для ИИ =====
@@ -236,14 +264,27 @@ ${subs}
     if (/пауз/.test(t) && !/графи|плашк|текст/.test(t)) { const on = !/(верн|не выреза)/.test(t); update((s) => { s.removePauses = on; }); return toast(on ? '✂ Паузы вырезаны' : '↔ Паузы вернул', true); }
     if (/(отмен|как было)/.test(t)) return undo();
     if (!S.overlay) return toast('Сначала дождись монтажа');
-    await editCode(text + ` (сейчас на экране момент ${mapSrc(R.segs, T).toFixed(1)} с исходного видео)`);
+    const stamps = [...text.matchAll(/(\d{1,2}):(\d{2})(?:[.,](\d))?/g)].map((m) => { const o = +m[1] * 60 + +m[2] + (m[3] ? +m[3] / 10 : 0); return `${m[0]} готового ролика = ${mapSrc(R.segs, o).toFixed(2)} с исходника`; });
+    await editCode(text + ` (сейчас на экране момент ${mapSrc(R.segs, T).toFixed(1)} с исходного видео${stamps.length ? '; ' + stamps.join('; ') : ''})`);
   }
   // ===== экспорт =====
-  async function exportMp4() {
+  async function verifyMp4(blob, w, h) {
+    const url = URL.createObjectURL(blob);
+    const m = await new Promise((res) => { const v = document.createElement('video'); v.preload = 'metadata'; v.muted = true; v.onloadedmetadata = () => res({d: v.duration, w: v.videoWidth, h: v.videoHeight}); v.onerror = () => res(null); v.src = url; setTimeout(() => res(null), 8000); });
+    URL.revokeObjectURL(url);
+    if (!blob.size) return 'файл пустой';
+    if (!m) return 'файл не открылся для проверки';
+    const bad = [];
+    if (Math.abs(m.d - R.outDur) > 0.4) bad.push('длина ' + m.d.toFixed(1) + ' с вместо ' + R.outDur.toFixed(1));
+    if (m.w != w || m.h != h) bad.push('размер ' + m.w + '×' + m.h);
+    return bad.join(', ');
+  }
+  async function exportMp4(final = true) {
+    const W0 = final ? 1080 : 720, H0 = final ? 1920 : 1280;
     try {
       const {renderMediaOnWeb} = await import('@remotion/web-renderer');
       setBusy({t: 'Собираю MP4…', s: 'Не выключайте экран', p: 0});
-      const scale = q == 1080 ? 1 : 720 / 1080;
+      const scale = W0 / 1080;
       const res = await renderMediaOnWeb({
         composition: {id: 'montage', component: Montage, durationInFrames: Math.max(1, Math.round(R.outDur * FPS)), fps: FPS, width: 1080, height: 1920},
         inputProps: {src: S.src, segs: R.segs, inserts: R.inserts, chunks: R.chunks, subStyle: S.subStyle, jumpZoom: S.jumpZoom, outDur: R.outDur, theme: S.theme, overlay: S.overlay, soundUrl: S.soundUrl},
@@ -251,11 +292,13 @@ ${subs}
         onProgress: (p) => setBusy({t: 'Собираю MP4…', s: Math.round(p.progress * 100) + '% · не выключайте экран', p: p.progress}),
       });
       const blob = await res.getBlob();
+      setBusy({t: 'Проверяю файл…', s: 'длина, размер, открывается ли', p: 1});
+      const bad = await verifyMp4(blob, W0, H0);
       setBusy(null);
-      const name = 'montazh_' + new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '') + '.mp4';
+      const name = (final ? 'final_' : 'chernovik_') + new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '') + '.mp4';
       window.__lastExport = {size: blob.size, name}; window.__lastBlob = blob;
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
-      toast('⬇ Готово: ' + name + ' (' + (blob.size / 1e6).toFixed(1) + ' МБ)', true, 5000);
+      toast(bad ? '⚠ ' + name + ' скачан, но проверка: ' + bad : '⬇ ' + name + ' (' + (blob.size / 1e6).toFixed(1) + ' МБ) · проверен: ' + W0 + '×' + H0 + ', ' + fmt(R.outDur), !bad, 6000);
     } catch (e) { setBusy(null); toast('Сборка не удалась: ' + e.message, false, 6000); console.error(e); }
   }
 
@@ -308,12 +351,12 @@ ${subs}
       </>;
     }
     if (mode == 'exp') return <>
-      <div className="row"><Tog on={q == 1080} label="1080p" onClick={() => { const v = q == 1080 ? 720 : 1080; setQ(v); LS.set('mnt_q', v); }}/><button className="btn lime" style={{flex: 1}} onClick={exportMp4}>⬇ Скачать MP4 ({fmt(R.outDur)})</button></div>
+      <div className="row"><button className="btn" style={{flex: 1}} onClick={() => exportMp4(false)}>Черновик 720p</button><button className="btn lime" style={{flex: 1.4}} onClick={() => exportMp4(true)}>⬇ Финал 1080p ({fmt(R.outDur)})</button></div>
     </>;
     return null;
   }
 
-  useEffect(() => { window.__app = {S, R, run, seek, exportMp4}; });
+  useEffect(() => { window.__app = {S, R, run, seek, exportMp4, inject: (o) => update((s) => Object.assign(s, o), false)}; });
   const durF = Math.max(1, Math.round(R.outDur * FPS));
   return <div id="app">
     <header><h1>VIDEO<b>.</b></h1><button className="btn lime" onClick={() => fileRef.current.click()}>＋ Своё видео</button><input ref={fileRef} type="file" accept="video/*" style={{position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none'}} onChange={onFile}/></header>
