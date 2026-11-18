@@ -22,7 +22,7 @@ header h1 b{color:var(--lime)}
 .btn.ic{width:38px;height:38px;padding:0;font-size:17px;display:grid;place-items:center}
 #stage{flex:1;min-height:0;display:flex;justify-content:center;align-items:center;position:relative;padding:0 12px}
 #cv{height:100%;max-height:100%;aspect-ratio:9/16;max-width:100%;border-radius:18px;background:#000;box-shadow:0 10px 40px rgba(0,0,0,.6);touch-action:manipulation}
-#playbtn{position:absolute;left:50%;top:50%;width:74px;height:74px;margin:-37px 0 0 -37px;border-radius:50%;background:rgba(198,255,61,.92);color:#111;font-size:30px;border:0;display:grid;place-items:center;transition:opacity .25s,transform .25s;pointer-events:none}
+#playbtn{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(198,255,61,.55);color:#111;font-size:22px;border:0;display:grid;place-items:center;transition:opacity .25s,transform .25s;pointer-events:none}
 #demoTag{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:var(--lime);color:#111;font-weight:900;font-size:14px;padding:11px 16px;border-radius:16px;white-space:nowrap;box-shadow:0 6px 20px rgba(0,0,0,.5);z-index:5;cursor:pointer}
 #demoTag.off{display:none}
 #playbtn.hide{opacity:0;transform:scale(.6)}
@@ -162,21 +162,7 @@ const E={
 const fmt=t=>{t=Math.max(0,t);const m=Math.floor(t/60),s=Math.floor(t%60);return m+":"+String(s).padStart(2,"0")};
 const LS={get:(k,d)=>{try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 
-/* ================= типы вставок ================= */
-const TYPES={
-  bubble:{n:"Пузырь с точками",e:"💬",d:1.0,sfx:"pop"},
-  quote:{n:"Цитата по словам",e:"❝",d:2.6,sfx:"pop"},
-  stamp:{n:"Штамп с ударом",e:"🟥",d:1.35,sfx:"thud",a:"ТАК И СКАЗАЛ"},
-  hearts:{n:"Сердечки",e:"💗",d:2.4,sfx:"pop"},
-  laugh:{n:"Смех: зум и шкала",e:"😂",d:2.6,sfx:"pop",a:"АХАХАХА"},
-  polaroid:{n:"Полароид",e:"📸",d:1.4,sfx:"pop",a:"этот момент"},
-  strike:{n:"Зачёркнутое слово",e:"✏️",d:2.9,sfx:"pop",a:"ПО ЕГО МНЕНИЮ",b:"было",c:"стало"},
-  slam:{n:"Крупный удар",e:"💥",d:1.75,sfx:"thud",a:"ОЙ,\nНЕ МОГУ"},
-  flash:{n:"Вспышка-переход",e:"⚡",d:0.45,sfx:"whoosh"},
-  sticker:{n:"Наклейка",e:"🟡",d:2.7,sfx:"pop",a:"V",b:"МИР"},
-  end:{n:"Финальная карточка",e:"🎬",d:1.3,sfx:"pop",a:"ИСТОРИЯ ПРО",b:"ГЛАВНОЕ"},
-};
-const TYPE_KEYS=Object.keys(TYPES);
+/* ================= вставки: ИИ собирает каждую из элементов ================= */
 const SUBS={
   karaoke:{n:"Караоке жёлтым",e:"🟨"},
   pop:{n:"По слову с прыжком",e:"🔤"},
@@ -186,9 +172,166 @@ const SUBS={
   off:{n:"Без субтитров",e:"🚫"},
 };
 const SUB_KEYS=Object.keys(SUBS);
+const GFX_DOC=`Холст 1080x1920 (x вправо, y вниз). Вставка (insert):
+{"t":сек_начала,"d":длительность,"icon":"один эмодзи для таймлайна","idea":"зачем эта вставка, 3-6 слов","sfx":"pop|thud|whoosh|none",
+ "cam":{"zoom":1.0-1.35,"zoomAt":сек_от_начала,"shake":0-30,"shakeAt":сек,"flash":true|false,"dim":0-0.7},
+ "layers":[слой,...]}
+Слои (у всех: "x","y" центр, "rot" градусы, "at" задержка появления от начала вставки, "dur" сколько живёт (по умолчанию до конца),
+ "in": pop|slam|drop|rise|left|right|fade|spin|stamp|none, "out": fade|pop|up|left|right|none, "loop": none|bob|pulse|wiggle|spin|shake):
+ {"k":"text","text":"текст, \\n перенос","size":40-220,"font":"b(жирный гротеск)|m(полужирный)|l(курсив с засечками)","color":"#hex","stroke":"#hex или пусто","box":{"color":"#hex или rgba","r":0-60,"pad":10-50},"stagger":"none|word|letter|type","step":0.04-0.4,"hl":["слова","для подсветки"],"hlColor":"#hex","maxW":300-1000}
+ {"k":"emoji","ch":"🔥","size":60-300,"fx":"none|float|rain|burst","n":1-20}
+ {"k":"shape","sh":"rect|circle|heart|star|arrow|line|ring|burst|underline","w":..,"h":..,"x2":..,"y2":..,"fill":"#hex или пусто","stroke":"#hex","sw":4-20,"draw":true (рисуется линией)}
+ {"k":"frame","w":..,"h":..,"cx":..,"cy":..,"s":1.5-3,"bcolor":"#hex","b":4-30,"caption":"подпись"} (окно-лупа: увеличенный кусок кадра вокруг точки cx,cy)`;
+
+/* ===== движок слоёв ===== */
+function hash(i){const x=Math.sin(i*127.1+311.7)*43758.5453;return x-Math.floor(x)}
+function animIn(kind,q){
+  const r={dx:0,dy:0,sc:1,rot:0,al:1};q=clamp(q);
+  switch(kind){
+    case"pop":r.sc=E.back(q,2.4);r.al=clamp(q*3);break;
+    case"slam":r.sc=lerp(2.4,1,E.in4(clamp(q/.6)));r.al=clamp(q*4);break;
+    case"stamp":r.sc=lerp(2.6,1,E.in4(clamp(q/.6)));r.rot=lerp(-16,0,E.in4(clamp(q/.6)));r.al=clamp(q*4);break;
+    case"drop":r.dy=-420*(1-E.back(q,1.8));r.al=clamp(q*3);break;
+    case"rise":r.dy=140*(1-E.out3(q));r.al=q;break;
+    case"left":r.dx=-760*(1-E.out3(q));break;
+    case"right":r.dx=760*(1-E.out3(q));break;
+    case"spin":r.rot=-200*(1-E.out3(q));r.sc=E.out3(q);break;
+    case"fade":r.al=q;break;
+  }
+  return r;
+}
+function animOut(kind,q){
+  const r={dx:0,dy:0,sc:1,rot:0,al:1};q=clamp(q);if(q<=0)return r;
+  switch(kind){
+    case"pop":r.sc=1-E.in2(q);break;
+    case"up":r.dy=-160*E.in2(q);r.al=1-q;break;
+    case"left":r.dx=-760*E.in2(q);break;
+    case"right":r.dx=760*E.in2(q);break;
+    case"none":break;
+    default:r.al=1-q;
+  }
+  return r;
+}
+function loopFx(kind,t){
+  const r={dx:0,dy:0,sc:1,rot:0};
+  if(kind=="bob")r.dy=Math.sin(t*4)*12;
+  if(kind=="pulse")r.sc=1+Math.sin(t*7)*.05;
+  if(kind=="wiggle")r.rot=Math.sin(t*9)*4;
+  if(kind=="spin")r.rot=t*120;
+  if(kind=="shake"){r.dx=Math.sin(t*61)*6;r.dy=Math.cos(t*53)*6}
+  return r;
+}
+function star(cx,cy,r1,r2,n=5){ctx.beginPath();for(let i=0;i<n*2;i++){const r=i%2?r2:r1,a=-Math.PI/2+i*Math.PI/n;ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r)}ctx.closePath()}
+function wrapLines(text,px,font,maxW){
+  const out=[];for(const para of String(text).split("\n")){let line=[];for(const w of para.split(/\s+/).filter(Boolean)){const tryL=line.concat(w).join(" ");if(line.length&&tw(tryL,px,font)>maxW){out.push(line);line=[w]}else line.push(w)}out.push(line)}
+  return out;
+}
+function drawText(L,lp,ld){
+  const font=["b","m","l"].includes(L.font)?L.font:"b";let px=clamp(+L.size||80,16,260);const maxW=clamp(+L.maxW||960,120,1040);
+  let lines=wrapLines(L.text||"",px,font,maxW);
+  while(px>24&&lines.some(l=>tw(l.join(" "),px,font)>1040)){px-=4;lines=wrapLines(L.text||"",px,font,maxW)}
+  const lh=px*1.12,H=lines.length*lh,gap=tw(" ",px,font);
+  {const W=Math.max(...lines.map(l=>tw(l.join(" "),px,font)))+(L.box?2*clamp(+L.box.pad||24,0,80):0),x=+L.x||540;const fx=Math.max(0,30-(x-W/2))-Math.max(0,(x+W/2)-1050);if(fx)ctx.translate(fx,0)}
+  const hl=(L.hl||[]).map(w=>norm(w).replace(/[.,!?«»"]/g,""));
+  const st=L.stagger||"none",step=clamp(+L.step||.12,.02,.6);
+  if(L.box){
+    const W=Math.max(...lines.map(l=>tw(l.join(" "),px,font)));const pad=clamp(+L.box.pad||24,0,80);
+    ctx.fillStyle=L.box.color||"rgba(0,0,0,.75)";rr(-W/2-pad,-H/2-pad*.7,W+pad*2,H+pad*1.4,clamp(+L.box.r||20,0,80));ctx.fill();
+  }
+  let wi=0,ci=0;
+  lines.forEach((ln,li)=>{
+    const lw=tw(ln.join(" "),px,font);let x=-lw/2;const y=-H/2+li*lh+px*.86;
+    ln.forEach(w=>{
+      const ww=tw(w,px,font);const isHl=hl.includes(norm(w).replace(/[.,!?«»"]/g,""));
+      const col=isHl?(L.hlColor||"#FFD43B"):(L.color||"#fff");
+      const o={f:font,al:"left",c:col};if(L.stroke)Object.assign(o,{st:L.stroke,sw:Math.max(6,px*.12)});else o.sh="rgba(0,0,0,.55)",o.sb=18,o.sy=4;
+      if(st=="word"){const q=(lp-wi*step)/.2;if(q>0){ctx.save();ctx.globalAlpha*=clamp(q*2);ctx.translate(x+ww/2,y+30*(1-clamp(q)));const s=lerp(.6,1,E.back(q,2.5));ctx.scale(s,s);txt(w,-ww/2,0,px,o);ctx.restore()}}
+      else if(st=="letter"||st=="type"){let cx=x;for(const ch of w){const q=(lp-ci*step)/(st=="type"?.01:.18);if(q>0){const cw=tw(ch,px,font);ctx.save();ctx.globalAlpha*=clamp(q*2);ctx.translate(cx,y+(st=="letter"?50*(1-E.back(q,3)):0));txt(ch,0,0,px,o);ctx.restore()}cx+=tw(ch,px,font);ci++}ci++}
+      else txt(w,x,y,px,o);
+      x+=ww+gap;wi++;
+    });
+  });
+}
+function drawShape(L,lp,ld){
+  const w=+L.w||200,h=+L.h||w,sw=clamp(+L.sw||10,1,40),draw=!!L.draw;
+  const prog=draw?E.out2(lp/.45):1;
+  ctx.lineWidth=sw;ctx.lineCap="round";ctx.lineJoin="round";ctx.strokeStyle=L.stroke||"#fff";ctx.fillStyle=L.fill||"transparent";
+  const doPath=(len)=>{if(L.fill&&!draw)ctx.fill();if(L.stroke||draw){if(draw){ctx.setLineDash([len,len]);ctx.lineDashOffset=len*(1-prog)}ctx.stroke();ctx.setLineDash([])}};
+  switch(L.sh){
+    case"circle":ctx.beginPath();ctx.ellipse(0,0,w/2,h/2,0,0,Math.PI*2);doPath(Math.PI*(w+h));break;
+    case"ring":ctx.beginPath();ctx.ellipse(0,0,w/2,h/2,0,-Math.PI/2,-Math.PI/2+Math.PI*2*prog);ctx.stroke();break;
+    case"heart":ctx.save();ctx.scale(w/120,h/110);heart(0,0,1);ctx.restore();doPath(420*w/120);break;
+    case"star":star(0,0,w/2,w/4.4);doPath(w*3.5);break;
+    case"burst":star(0,0,w/2,w/3.2,12);doPath(w*5);break;
+    case"underline":ctx.beginPath();ctx.moveTo(-w/2,0);ctx.quadraticCurveTo(0,h*.25,w/2,-h*.1);doPath(w*1.2);break;
+    case"line":case"arrow":{
+      const x2=(+L.x2||(+L.x+w))-(+L.x||0),y2=(+L.y2||+L.y||0)-(+L.y||0);const len=Math.hypot(x2,y2)||1;
+      ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(x2*prog,y2*prog);ctx.stroke();
+      if(L.sh=="arrow"&&prog>.9){const a=Math.atan2(y2,x2),hs=sw*3.2;ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-hs*Math.cos(a-.5),y2-hs*Math.sin(a-.5));ctx.moveTo(x2,y2);ctx.lineTo(x2-hs*Math.cos(a+.5),y2-hs*Math.sin(a+.5));ctx.stroke()}
+      break}
+    default:rr(-w/2,-h/2,w,h,clamp(+L.r||18,0,200));doPath(2*(w+h));
+  }
+}
+function drawEmoji(L,lp,ld,base){
+  const sz=clamp(+L.size||120,20,400),n=clamp(+L.n||1,1,24)|0,fx=L.fx||"none";
+  ctx.font=sz+"px system-ui, 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
+  if(fx=="none"){ctx.fillText(L.ch||"✨",0,0);return}
+  const k=clamp(lp/Math.max(.3,ld));
+  for(let i=0;i<n;i++){
+    ctx.save();
+    if(fx=="float"){const o=i*.12;const q=clamp((lp-o)/Math.max(.3,ld-o));ctx.translate((hash(i)-.5)*360,-560*E.out2(q));ctx.globalAlpha*=1-q;ctx.rotate((hash(i+9)-.5)*.6)}
+    if(fx=="rain"){ctx.setTransform(Q,0,0,Q,0,0);const x=hash(i)*1080,sp=.7+hash(i+3)*.6;ctx.translate(x,-150+(2200*((k*sp+hash(i+5))%1)));ctx.rotate((hash(i+7)-.5)*.8)}
+    if(fx=="burst"){const a=i/n*Math.PI*2+hash(i)*.3,dist=420*E.out3(k*1.6);ctx.translate(Math.cos(a)*dist,Math.sin(a)*dist);ctx.globalAlpha*=1-clamp((k-.5)*2)}
+    ctx.fillText(L.ch||"✨",0,0);ctx.restore();
+  }
+}
+function drawFrame(L){
+  const w=+L.w||420,h=+L.h||420,b=clamp(+L.b||12,0,40),el=curV();
+  ctx.save();ctx.shadowColor="rgba(0,0,0,.5)";ctx.shadowBlur=40;ctx.shadowOffsetY=18;ctx.fillStyle=L.bcolor||"#fff";rr(-w/2-b,-h/2-b,w+b*2,h+b*2+(L.caption?70:0),18);ctx.fill();ctx.restore();
+  if(el.videoWidth){
+    const {vw,vh,sc}=vidRect(el),dw=vw*sc,dh=vh*sc,ox=(1080-dw)/2,oy=(1920-dh)/2,s=clamp(+L.s||2,1,5);
+    const cw=w/s/sc,chh=h/s/sc;let sx=((+L.cx||540)-ox)/sc-cw/2,sy=((+L.cy||800)-oy)/sc-chh/2;
+    sx=clamp(sx,0,Math.max(0,vw-cw));sy=clamp(sy,0,Math.max(0,vh-chh));
+    ctx.save();rr(-w/2,-h/2,w,h,10);ctx.clip();ctx.drawImage(el,sx,sy,cw,chh,-w/2,-h/2,w,h);ctx.restore();
+  }
+  if(L.caption)txt(L.caption,0,h/2+b+48,lerpFit(L.caption,46,w,"l"),{f:"l",c:"#222"});
+}
+function camera(T,segIdx){
+  let z=(S.jumpZoom&&segIdx%2)?1.12:1,x=0,y=0;
+  for(const n of active(T)){
+    const c=n.cam||{};const p=T-n.o,d=n.d;
+    if(c.zoom&&c.zoom!=1){const za=+c.zoomAt||0;z*=lerp(1,clamp(+c.zoom,.8,1.6),E.out3((p-za)/.25)*(1-E.sine((p-(d-.3))/.3)))}
+    if(c.shake){const sa=+c.shakeAt||0;if(p>sa&&p<sa+.32){const k=Math.floor((p-sa)/.04);const s=clamp(+c.shake,0,40);x+=(k%2?-1:1)*s;y+=(k%3-1)*s*.5}}
+  }
+  return{z,x,y};
+}
+function drawIns(n,p,T){
+  const d=n.d,c=n.cam||{};
+  if(c.dim){ctx.save();ctx.globalAlpha=clamp(+c.dim,0,.8)*clamp(p/.2)*clamp((d-p)/.2);ctx.fillStyle="#000";ctx.fillRect(0,0,1080,1920);ctx.restore()}
+  (n.layers||[]).forEach((L,i)=>{
+    const at=+L.at||0,ld=Math.max(.2,Math.min(isFinite(L.dur)?+L.dur:d-at,d-at));const lp=p-at;
+    if(lp<0||lp>ld)return;
+    const a=animIn(L.in||"pop",lp/.3),o=animOut(L.out||"fade",(lp-(ld-.25))/.25),l=loopFx(L.loop||"none",lp);
+    ctx.save();
+    ctx.translate((+L.x||540)+a.dx+o.dx+l.dx,(+L.y||600)+a.dy+o.dy+l.dy);
+    ctx.rotate(((+L.rot||0)+a.rot+o.rot+l.rot)*Math.PI/180);
+    const sc=a.sc*o.sc*l.sc;ctx.scale(sc,sc);
+    ctx.globalAlpha=clamp(a.al*o.al);
+    if(L.k=="text")drawText(L,lp,ld);
+    else if(L.k=="emoji")drawEmoji(L,lp,ld);
+    else if(L.k=="shape")drawShape(L,lp,ld);
+    else if(L.k=="frame")drawFrame(L);
+    ctx.restore();
+  });
+  if(c.flash){const a=p<.08?p/.08:1-E.out2((p-.08)/.3);if(a>0){ctx.save();ctx.globalAlpha=clamp(a);ctx.fillStyle="#fff";ctx.fillRect(0,0,1080,1920);ctx.restore()}}
+}
+function cleanIns(o,fallbackT){
+  const n={id:o.id||uid++,t:isFinite(o.t)?clamp(+o.t,0,Math.max(0,S.dur-0.2)):fallbackT||0,d:clamp(isFinite(o.d)?+o.d:2,0.3,8),icon:String(o.icon||"✨").slice(0,4),idea:String(o.idea||""),sfx:["pop","thud","whoosh","none"].includes(o.sfx)?o.sfx:"pop",cam:o.cam&&typeof o.cam=="object"?o.cam:{},layers:Array.isArray(o.layers)?o.layers.slice(0,12):[]};
+  return n;
+}
 
 /* ================= состояние ================= */
-let S={dur:0,words:[],keep:[],inserts:[],cuts:[],subStyle:"karaoke",removePauses:false,jumpZoom:true,title:"",src:null,name:"демо"};
+let S={dur:0,words:[],keep:[],inserts:[],cuts:[],subStyle:"karaoke",removePauses:false,jumpZoom:true,title:"",src:null,name:""};
 let R={pieces:[],segs:[],outDur:0};
 let hist=[];
 let selId=null, uid=1;
@@ -292,7 +435,7 @@ function step(){
     if(P.playing){
       const g2=R.segs[P.i];
       P.T=g2.o+clamp(src-g2.s,0,g2.e-g2.s);
-      for(const n of S.inserts){if(n.o>P.lastT&&n.o<=P.T+0.01){const t=TYPES[n.type];if(t&&t.sfx)sfx(t.sfx,t.sfx=="thud"?0.8:0.5)}}
+      for(const n of S.inserts){if(n.o>P.lastT&&n.o<=P.T+0.01&&n.sfx&&n.sfx!="none")sfx(n.sfx,n.sfx=="thud"?0.8:0.5)}
       P.lastT=P.T+0.01;
     }
   }
@@ -325,123 +468,15 @@ function drawVideo(el,z,x,y){
   ctx.drawImage(el,(1080-dw)/2,(1920-dh)/2,dw,dh);ctx.restore();
 }
 function active(T){return S.inserts.filter(n=>T>=n.o&&T<n.o+n.d)}
-function camera(T,segIdx){
-  let z=(S.jumpZoom&&segIdx%2)?1.12:1,x=0,y=0;
-  for(const n of active(T)){
-    const p=T-n.o,d=n.d;
-    if(n.type=="stamp"){if(p>.18&&p<.33){const k=Math.floor((p-.18)/.04);x+=[14,-10,6,0][k]||0}}
-    if(n.type=="laugh"){const zin=E.out3(p/.35),zout=E.sine((p-(d-.3))/.3);z*=lerp(1,1.22,zin*(1-zout))}
-    if(n.type=="slam"){const zin=E.out3((p-.05)/.15),zout=E.sine((p-(d-.45))/.3);z*=lerp(1,1.25,zin*(1-zout));if(p>.2&&p<.45){const k=Math.floor((p-.2)/.05);x+=k%2?-18:18;y+=k%2?10:-10}}
-    if(n.type=="flash"){if(p<.15)x+=-260*E.in2(p/.15);else x+=260*(1-E.out3((p-.15)/.2))}
-  }
-  return{z,x,y};
-}
 function render(T){
   ctx.setTransform(Q,0,0,Q,0,0);
   ctx.fillStyle="#000";ctx.fillRect(0,0,1080,1920);
+  if(!S.src){txt("Загрузи видео",540,900,80,{c:"#C6FF3D"});txt("кнопкой «＋ Своё видео» вверху",540,990,44,{f:"m",c:"#aaa"});return}
   const m=mapSrc(T),cam=camera(T,m.i);
   drawVideo(curV(),cam.z,cam.x,cam.y);
-  const act=active(T);
-  const endOn=act.some(n=>n.type=="end");
-  for(const n of act)if(n.type!="end"&&n.type!="flash")drawIns(n,T-n.o,T);
-  if(!endOn)drawSubs(T);
-  for(const n of act)if(n.type=="end"||n.type=="flash")drawIns(n,T-n.o,T);
+  drawSubs(T);
+  for(const n of active(T))drawIns(n,T-n.o,T);
   ctx.fillStyle="#FFD43B";ctx.fillRect(0,0,1080*clamp(T/(R.outDur||1)),10);
-}
-function fadeOut(p,d,len=.2){return clamp((d-p)/len)}
-function drawIns(n,p,T){
-  const d=n.d;ctx.save();
-  switch(n.type){
-  case"bubble":{
-    const s=E.back(p/.25,2.5)*fadeOut(p,d,.15);if(s<=0)break;
-    ctx.translate(220,390);ctx.scale(s,s);ctx.translate(-220,-390);
-    ctx.fillStyle="#fff";rr(110,330,220,120,60);ctx.fill();
-    ctx.beginPath();ctx.moveTo(150,440);ctx.lineTo(186,440);ctx.lineTo(168,476);ctx.fill();
-    ctx.fillStyle="#222";
-    for(let i=0;i<3;i++){const yy=-14*Math.max(0,Math.sin((p-.3-i*.08)*Math.PI/.3));ctx.beginPath();ctx.arc(166+i*54,390+yy,14,0,7);ctx.fill()}
-    break}
-  case"quote":{
-    const a=E.out3(p/.25)*fadeOut(p,d,.2);if(a<=0)break;
-    ctx.globalAlpha=a;ctx.translate(0,lerp(-40,0,E.out3(p/.25))+(p>d-.2?-30*(1-fadeOut(p,d,.2)):0));
-    let ws=S.words.filter(w=>!w.off&&w.os>=n.o-0.05&&w.os<n.o+d-0.3).map(w=>({w:w.w,t:w.os}));
-    if(!ws.length){const parts=(n.a||"…").split(/\s+/);ws=parts.map((w,i)=>({w,t:n.o+0.05+i*Math.min(.35,(d*.6)/parts.length)}))}
-    const hot=(n.b||ws[ws.length-1].w).toLowerCase();
-    let px=76;const lines=[[]];let lw=0;
-    for(const w of ws){const ww=tw(w.w,px)+18;if(lw+ww>860&&lines[lines.length-1].length){lines.push([]);lw=0}lines[lines.length-1].push({...w,ww});lw+=ww}
-    const h=Math.max(300,100+lines.length*95+(lines.length<3?40:0));
-    ctx.fillStyle="rgba(12,12,14,.8)";rr(60,250,960,h,36);ctx.fill();
-    txt("“",80,250+110,220,{f:"l",al:"left",c:"#FFD43B"});
-    let lastT=0;
-    lines.forEach((ln,li)=>{let x=120;for(const w of ln){const q=(T-w.t)/.2;if(q>0){const e=E.back(q,2.5);ctx.save();ctx.globalAlpha=a*clamp(q*1.5);const cx=x+w.ww/2,cy=250+60+76+li*95;ctx.translate(cx,cy+40*(1-clamp(q*1.2)));ctx.scale(lerp(.7,1,e),lerp(.7,1,e));txt(w.w,0,0,px,{al:"center",c:w.w.toLowerCase().replace(/[.,!?]/g,"")==hot.replace(/[.,!?]/g,"")?"#FF4F7B":"#fff"});ctx.restore()}x+=w.ww;lastT=Math.max(lastT,w.t)}});
-    const hp=clamp((T-lastT-.05)/.5);
-    if(hp>0){ctx.save();ctx.translate(950,250+h-70);ctx.strokeStyle="#FF4F7B";ctx.lineWidth=8;ctx.setLineDash([360,400]);ctx.lineDashOffset=360*(1-E.out2(hp));heart(0,0,0.95);ctx.stroke();ctx.restore()}
-    break}
-  case"stamp":{
-    const q=p/.18;const s=lerp(2.6,1,E.in4(q)),r=lerp(-22,-9,E.in4(q)),a=clamp(q)*fadeOut(p,d,.15);if(a<=0)break;
-    const text=n.a||"ТАК И СКАЗАЛ";let px=72;while(tw(text,px,"b",4)>860&&px>30)px-=4;const w=Math.max(700,tw(text,px,"b",4)+90);
-    ctx.globalAlpha=a;ctx.translate(540,700);ctx.rotate(r*Math.PI/180);ctx.scale(s,s);
-    ctx.fillStyle="rgba(255,255,255,.88)";rr(-w/2,-62,w,124,18);ctx.fill();ctx.lineWidth=10;ctx.strokeStyle="#E8323C";ctx.stroke();
-    txt(text,0,px*.36,px,{c:"#E8323C",ls:4});
-    break}
-  case"hearts":{
-    const H=[[175,1150,0,"#FF4F7B"],[915,1100,.1,"#FF7FA0"],[295,1230,.25,"#FFD43B"],[815,1220,.4,"#FF4F7B"],[535,1280,.55,"#FF7FA0"]];
-    H.forEach(([x,y,o,c],i)=>{const q=(p-o)/1.85;if(q<0||q>1)return;const e=1-Math.pow(1-q,1.6);ctx.save();ctx.globalAlpha=1-q;ctx.translate(x,y-(560+i*40)*e);ctx.rotate(lerp(i%2?12:-12,i%2?-10:10,e)*Math.PI/180);const s=1.15*E.out3(q*3);ctx.scale(s,s);ctx.fillStyle=c;heart(0,0,1);ctx.fill();ctx.restore()});
-    break}
-  case"laugh":{
-    const a=fadeOut(p,d,.25);const L=[...(n.a||"АХАХАХА")];let px=140;while(tw(L.join(""),px)>1000&&px>40)px-=6;
-    const tot=tw(L.join(""),px);let x=540-tot/2;
-    ctx.globalAlpha=a;
-    L.forEach((ch,i)=>{const q=(p-.15-i*.06)/.2;const w=tw(ch,px);if(q>0){let yy=80*(1-E.back(q,3));if(p>.75)yy+=-30*Math.max(0,Math.sin((p-.75-i*.05)*Math.PI/.36));ctx.save();ctx.globalAlpha=a*clamp(q*2);txt(ch,x+w/2,440+yy,px,{c:"#FFD43B",sh:"rgba(0,0,0,.6)",sb:30,sy:8});ctx.restore()}x+=w});
-    const mx=960+160*(1-E.out3((p-.15)/.3));
-    ctx.save();rr(mx,560,56,560,28);ctx.fillStyle="rgba(0,0,0,.55)";ctx.fill();ctx.clip();
-    const fh=560*E.out2((p-.35)/2);const g=ctx.createLinearGradient(0,1120,0,560);g.addColorStop(0,"#FF4F7B");g.addColorStop(1,"#FFD43B");ctx.fillStyle=g;ctx.fillRect(mx,1120-fh,56,fh);ctx.restore();
-    ctx.lineWidth=4;ctx.strokeStyle="#fff";rr(mx,560,56,560,28);ctx.stroke();
-    ctx.globalAlpha=a*clamp((p-.25)/.2);txt("СМЕХ",mx+28,1180,34,{f:"m"});
-    break}
-  case"polaroid":{
-    const qi=E.back(p/.4,1.6),qo=E.in2((p-(d-.25))/.25);
-    ctx.translate(770+600*qo,510+lerp(-700,0,qi));ctx.rotate((lerp(18,-6,qi)+16*qo)*Math.PI/180);ctx.translate(-210,-260);
-    ctx.save();ctx.shadowColor="rgba(0,0,0,.5)";ctx.shadowBlur=60;ctx.shadowOffsetY=30;ctx.fillStyle="#fdfbf5";rr(0,0,420,520,10);ctx.fill();ctx.restore();
-    const el=curV();if(el.videoWidth){const {vw,vh,sc}=vidRect(el);const cw=560/sc,chh=590/sc;const sx=vw/2-cw/2,sy=(vh/2-(1920/2-800)/sc)-chh/2-(60/sc);ctx.drawImage(el,clamp(sx,0,vw-cw),clamp(sy,0,vh-chh),cw,chh,30,30,360,380)}
-    txt(n.a||"",210,478,lerpFit(n.a||"",54,360,"l"),{f:"l",c:"#222"});
-    break}
-  case"strike":{
-    const a=E.back(p/.25,2)*1;const al=fadeOut(p,d,.2);if(al<=0)break;
-    ctx.globalAlpha=clamp(p/.15)*al;ctx.translate(540,460);const s=lerp(.6,1,clamp(a,0,1.2));ctx.scale(s,s);ctx.translate(-540,-460-(p>d-.2?40*(1-al):0));
-    ctx.fillStyle="rgba(12,12,14,.8)";rr(90,260,900,400,36);ctx.fill();
-    const tag=n.a||"";const tg=tw(tag,34,"m")+52;ctx.fillStyle="#FFD43B";rr(140,300,tg,56,28);ctx.fill();txt(tag,140+tg/2,340,34,{f:"m",c:"#111"});
-    const old=n.b||"",px1=lerpFit(old,84,780);txt(old,140,470,px1,{al:"left",c:"#bbb"});
-    const sw=tw(old,px1)+16,t1=d*.3;ctx.fillStyle="#E8323C";rr(134,440,sw*E.out2((p-t1)/.25),12,6);ctx.fill();
-    const t2=d*.47,t3=d*.57;
-    ctx.save();ctx.globalAlpha*=clamp((p-t2)/.2);txt("→",140-60*(1-E.out2((p-t2)/.2)),600,80,{al:"left",c:"#FFD43B"});ctx.restore();
-    if(p>t3){const nw=n.c||"",px2=lerpFit(nw,84,720);const q=E.back((p-t3)/.25,2.5);ctx.save();ctx.globalAlpha*=clamp((p-t3)/.12);ctx.translate(240,575);ctx.scale(lerp(1.6,1,q),lerp(1.6,1,q));txt(nw,0,25,px2,{al:"left",c:"#FFD43B"});ctx.restore()}
-    break}
-  case"slam":{
-    const q=(p-0)/.18;const a=clamp(q*3)*fadeOut(p,d,.2);if(a<=0)break;
-    const lines=(n.a||"").split("\n");let px=170;while(Math.max(...lines.map(l=>tw(l,px)))>1000&&px>50)px-=8;
-    ctx.globalAlpha=a;ctx.translate(540,280+lines.length*px/2);ctx.scale(lerp(2.4,1,E.in4(q)),lerp(2.4,1,E.in4(q)));
-    if(p>.2&&p<1.2)ctx.rotate(4*Math.sin((p-.2)*Math.PI/.12)*Math.PI/180*(1-(p-.2)));
-    lines.forEach((l,i)=>{const y=(i-lines.length/2)*px+px*.85;txt(l,8,y+8,px,{c:"#FF4F7B"});txt(l,0,y,px,{c:"#fff"})});
-    break}
-  case"flash":{
-    const a=p<.15?p/.15:1-E.out2((p-.18)/.25);ctx.globalAlpha=clamp(a);ctx.fillStyle="#fff";ctx.fillRect(0,0,1080,1920);
-    break}
-  case"sticker":{
-    let s=E.back(p/.35,2.5),r=lerp(-40,12,E.out3(p/.35));if(p>.4)r=lerp(12,-6,E.sine(((p-.4)%1)/.5>1?2-((p-.4)%1)/.5:((p-.4)%1)/.5));
-    if(p>d-.25)s*=1-E.in2((p-(d-.25))/.2);if(s<=0)break;
-    ctx.translate(850,430);ctx.rotate(r*Math.PI/180);ctx.scale(s,s);
-    ctx.fillStyle="#FFD43B";ctx.beginPath();ctx.arc(0,0,150,0,7);ctx.fill();ctx.lineWidth=10;ctx.strokeStyle="#fff";ctx.stroke();
-    const big=n.a||"",bp=lerpFit(big,150,220);txt(big,0,n.b?40:bp*.36,bp,{c:"#111"});
-    if(n.b)txt(n.b,0,100,lerpFit(n.b,40,220,"m",6),{f:"m",c:"#111",ls:6});
-    break}
-  case"end":{
-    ctx.globalAlpha=clamp(p/.25);ctx.fillStyle="rgba(0,0,0,.6)";ctx.fillRect(0,0,1080,1920);
-    const q1=E.out3((p-.05)/.25);ctx.globalAlpha=clamp((p-.05)/.25);txt(n.a||"",540,824+40*(1-q1),lerpFit(n.a||"",64,980,"m",8),{f:"m",ls:8});
-    const q2=E.back((p-.15)/.25,2);if(p>.15){ctx.globalAlpha=clamp((p-.15)/.15);ctx.save();ctx.translate(540,960);const sc=lerp(1.8,1,q2);ctx.scale(sc,sc);txt(n.b||"",0,50,lerpFit(n.b||"",150,1000),{c:"#FFD43B"});ctx.restore()}
-    if(n.o+d>=R.outDur-0.3){const fo=clamp((p-(d-.27))/.25);ctx.globalAlpha=fo;ctx.fillStyle="#000";ctx.fillRect(0,0,1080,1920)}
-    break}
-  }
-  ctx.restore();
 }
 function lerpFit(s,px,max,k="b",ls=0){while(px>20&&tw(s,px,k,ls)>max)px-=2;return px}
 function drawSubs(T){
@@ -490,7 +525,7 @@ function drawLine(){
     let c=have.get(String(n.id));
     if(!c){c=document.createElement("div");c.className="ch new";c.dataset.id=n.id;c.onclick=e=>{e.stopPropagation();selectIns(n.id,true)};C.appendChild(c);setTimeout(()=>c.classList.remove("new"),500)}
     have.delete(String(n.id));
-    c.textContent=TYPES[n.type].e;c.style.left=(100*n.o/(R.outDur||1))+"%";c.classList.toggle("sel",n.id==selId);
+    c.textContent=n.icon||"✨";c.style.left=(100*n.o/(R.outDur||1))+"%";c.classList.toggle("sel",n.id==selId);
   }
   for(const c of have.values()){c.style.transform="translateX(-50%) scale(0)";setTimeout(()=>c.remove(),250)}
   $("#tdur").textContent=fmt(R.outDur)+(R.outDur<S.dur-0.05?"  (было "+fmt(S.dur)+")":"");
@@ -503,24 +538,25 @@ $("#line").addEventListener("pointerdown",e=>{pause();lineSeek(e);const mv=ev=>l
 
 /* ================= панели ================= */
 let mode="mont";
-const liked={sub:LS.get("mnt_liked_sub",[]),ins:LS.get("mnt_liked_ins",[])};
+const liked={sub:LS.get("mnt_liked_sub",[])};
 let onlyLiked=false;
 document.querySelectorAll(".md").forEach(b=>b.onclick=()=>{mode=b.dataset.m;document.querySelectorAll(".md").forEach(x=>x.classList.toggle("on",x==b));panel()});
 function tog(id,label,on){return`<div class="tog ${on?"on":""}" id="${id}"><i></i>${label}</div>`}
 function panel(dir=1){
   const el=$("#panel");
+  if(!S.src){el.innerHTML=`<div class="hint" style="font-size:14px">Нажми «＋ Своё видео» вверху. ИИ посмотрит ролик и смонтирует его со своими вставками.</div>`;return}
   if(mode=="mont"){
     const cut=S.dur-R.outDur;
     el.innerHTML=`<div class="row">${tog("tP","Вырезать паузы",S.removePauses)}${tog("tZ","Зум-скачки",S.jumpZoom)}</div>
     <div class="row" style="margin-top:8px"><button class="btn" id="bAuto" style="flex:1">✨ Смонтировать заново</button><button class="btn" id="bUndo">↩ Отменить</button></div>
-    <div class="hint">пауз найдено: ${R.pieces.filter(p=>p.gap).length}${cut>0.05?", вырезано "+cut.toFixed(1)+" с":""} · вставок ${S.inserts.length} · ${S.name}</div>`;
-    $("#tP").onclick=()=>run("убери паузы",S.removePauses?"верни паузы":"убери паузы");
+    <div class="hint">${S.title?"«"+esc(S.title)+"» · ":""}вставок ${S.inserts.length}${cut>0.05?" · вырезано "+cut.toFixed(1)+" с":""}</div>`;
+    $("#tP").onclick=()=>{pushHist();S.removePauses=!S.removePauses;rebuild();panel()};
     $("#tZ").onclick=()=>{pushHist();S.jumpZoom=!S.jumpZoom;rebuild();panel()};
     $("#bAuto").onclick=()=>autoMontage();
     $("#bUndo").onclick=()=>{undo();panel()};
   }else if(mode=="sub"){
     let list=onlyLiked&&liked.sub.length?SUB_KEYS.filter(k=>liked.sub.includes(k)):SUB_KEYS;
-    let i=Math.max(0,list.indexOf(S.subStyle));if(!list.includes(S.subStyle)){i=0}
+    let i=Math.max(0,list.indexOf(S.subStyle));
     const k=list[i];const t=SUBS[k];
     el.innerHTML=`<div class="vhead"><span>ВАРИАНТ ${i+1} ИЗ ${list.length}</span><button class="btn" id="bOnly" style="padding:5px 10px;font-size:11px">${onlyLiked?"Все":"Мои: "+liked.sub.length}</button></div>
     <div class="car" id="car" style="--ed:${dir}"><button class="ar l" id="cl">‹</button><div class="nm"><span class="e">${t.e}</span>${t.n}</div><button class="ar r" id="cr">›</button></div>
@@ -528,29 +564,28 @@ function panel(dir=1){
     <div class="dots">${list.map((x,j)=>`<i class="${j==i?"on":""} ${liked.sub.includes(x)?"lk":""}"></i>`).join("")}</div>`;
     const go=s=>{const j=(i+s+list.length)%list.length;S.subStyle=list[j];if(!P.playing)render(P.T);panel(s)};
     $("#cl").onclick=()=>go(-1);$("#cr").onclick=()=>go(1);swipe($("#car"),go);
-    $("#bLike").onclick=()=>{toggleLike("sub",k);panel(0)};
+    $("#bLike").onclick=()=>{const a=liked.sub,j=a.indexOf(k);if(j<0)a.push(k);else a.splice(j,1);LS.set("mnt_liked_sub",a);panel(0)};
     $("#bOnly").onclick=()=>{onlyLiked=!onlyLiked;panel(0)};
   }else if(mode=="ins"){
     let n=S.inserts.find(x=>x.id==selId);
     if(!n){n=nearestIns();if(n)selId=n.id}
-    if(!n){el.innerHTML=`<div class="hint">Вставок нет.</div><button class="btn lime" id="bAdd" style="margin-top:8px">＋ Вставка здесь</button>`;$("#bAdd").onclick=()=>addIns("stamp");return}
-    let list=onlyLiked&&liked.ins.length?TYPE_KEYS.filter(k=>liked.ins.includes(k)):TYPE_KEYS;
-    let i=Math.max(0,list.indexOf(n.type));const t=TYPES[n.type];
-    const fA=["stamp","laugh","polaroid","strike","slam","sticker","end","quote"].includes(n.type),fB=["strike","sticker","end"].includes(n.type),fC=n.type=="strike";
-    el.innerHTML=`<div class="vhead"><span>ВСТАВКА ${S.inserts.indexOf(n)+1}/${S.inserts.length} · ВАРИАНТ ${i+1} ИЗ ${list.length}</span><button class="btn" id="bOnly" style="padding:5px 10px;font-size:11px">${onlyLiked?"Все":"Мои: "+liked.ins.length}</button></div>
-    <div class="car" id="car" style="--ed:${dir}"><button class="ar l" id="cl">‹</button><div class="nm"><span class="e">${t.e}</span>${t.n}</div><button class="ar r" id="cr">›</button></div>
-    <div class="row" style="margin-top:8px">${fA?`<input class="fld" id="fa" style="flex:2" value="${esc((n.a||"").replace(/\n/g," / "))}" placeholder="текст">`:""}${fB?`<input class="fld" id="fb" style="flex:1" value="${esc(n.b||"")}">`:""}${fC?`<input class="fld" id="fc" style="flex:1" value="${esc(n.c||"")}">`:""}</div>
-    <div class="row" style="margin-top:8px"><button class="btn" id="pv">◀ Пред.</button><button class="btn like ${liked.ins.includes(n.type)?"on":""}" id="bLike">♥</button><button class="btn" id="bDel">🗑</button><button class="btn" id="bAdd">＋ Сюда</button><button class="btn" id="nx">След. ▶</button></div>`;
-    const go=s=>{pushHist();const j=(i+s+list.length)%list.length;setType(n,list[j]);rebuild();previewIns(n);panel(s)};
+    if(!n){el.innerHTML=`<div class="hint">Вставок пока нет.</div><button class="btn lime" id="bAdd" style="margin-top:8px">✨ ИИ, придумай вставку здесь</button>`;$("#bAdd").onclick=()=>aiInsertHere();return}
+    if(!n.vars)n.vars=[strip(n)];if(n.vi==null)n.vi=0;
+    const vi=n.vi,N=n.vars.length;
+    const texts=(n.layers||[]).map((L,j)=>L.k=="text"?j:-1).filter(j=>j>=0).slice(0,2);
+    el.innerHTML=`<div class="vhead"><span>ВСТАВКА ${S.inserts.indexOf(n)+1}/${S.inserts.length} · ВАРИАНТ ${vi+1} ИЗ ${N}${n.loading?" · ИИ придумывает…":""}</span></div>
+    <div class="car" id="car" style="--ed:${dir}"><button class="ar l" id="cl">‹</button><div class="nm" style="font-size:16px;padding:0 44px;text-align:center"><span class="e">${esc(n.icon)}</span>${esc(n.idea||"вставка")}</div><button class="ar r" id="cr">›</button></div>
+    <div class="row" style="margin-top:8px">${texts.map(j=>`<input class="fld" data-l="${j}" style="flex:1" value="${esc(String(n.layers[j].text||"").replace(/\n/g," / "))}">`).join("")}</div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="pv">◀</button><button class="btn like ${n.keep?"on":""}" id="bLike">♥ Оставить</button><button class="btn" id="bMore">✨ Ещё идеи</button><button class="btn" id="bDel">🗑</button><button class="btn" id="nx">▶</button></div>
+    <div class="dots">${n.vars.map((x,j)=>`<i class="${j==vi?"on":""}"></i>`).join("")}</div>`;
+    const go=s=>{if(N<2&&s>0){moreIdeas(n);return}const j=(vi+s+N)%N;applyVar(n,j);panel(s)};
     $("#cl").onclick=()=>go(-1);$("#cr").onclick=()=>go(1);swipe($("#car"),go);
-    const inp=(id,key)=>{const x=$(id);if(x)x.oninput=()=>{n[key]=key=="a"&&n.type=="slam"?x.value.replace(/\s*\/\s*/g,"\n"):x.value.replace(/\s*\/\s*/g,"\n");if(!P.playing)render(P.T)}};
-    inp("#fa","a");inp("#fb","b");inp("#fc","c");
-    $("#bLike").onclick=()=>{toggleLike("ins",n.type);panel(0)};
+    el.querySelectorAll("input[data-l]").forEach(x=>x.oninput=()=>{n.layers[+x.dataset.l].text=x.value.replace(/\s*\/\s*/g,"\n");n.vars[n.vi]=strip(n);if(!P.playing)render(P.T)});
+    $("#bLike").onclick=()=>{n.keep=!n.keep;toast(n.keep?"♥ Оставил этот вариант":"Отметка снята");panel(0)};
+    $("#bMore").onclick=()=>moreIdeas(n);
     $("#bDel").onclick=()=>{pushHist();S.inserts=S.inserts.filter(x=>x!=n);selId=null;rebuild();panel(0);toast("🗑 Вставка убрана")};
-    $("#bAdd").onclick=()=>addIns(n.type);
-    $("#pv").onclick=()=>{const k=S.inserts.indexOf(n);const m=S.inserts[(k-1+S.inserts.length)%S.inserts.length];selectIns(m.id,true)};
-    $("#nx").onclick=()=>{const k=S.inserts.indexOf(n);const m=S.inserts[(k+1)%S.inserts.length];selectIns(m.id,true)};
-    $("#bOnly").onclick=()=>{onlyLiked=!onlyLiked;panel(0)};
+    $("#pv").onclick=()=>{const k=S.inserts.indexOf(n);selectIns(S.inserts[(k-1+S.inserts.length)%S.inserts.length].id,true)};
+    $("#nx").onclick=()=>{const k=S.inserts.indexOf(n);selectIns(S.inserts[(k+1)%S.inserts.length].id,true)};
   }else if(mode=="exp"){
     const q=LS.get("mnt_q",1080);
     el.innerHTML=`<div class="row">${tog("tQ","Качество 1080p (выкл = 720p, быстрее)",q==1080)}</div>
@@ -561,99 +596,80 @@ function panel(dir=1){
   }
 }
 const esc=s=>String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
-function toggleLike(kind,k){const a=liked[kind];const j=a.indexOf(k);if(j<0)a.push(k);else a.splice(j,1);LS.set("mnt_liked_"+kind,a);toast(j<0?"♥ Отмечено":"Отметка снята")}
 function swipe(el,go){let x0=null;el.addEventListener("touchstart",e=>x0=e.touches[0].clientX,{passive:true});el.addEventListener("touchend",e=>{if(x0==null)return;const dx=e.changedTouches[0].clientX-x0;if(Math.abs(dx)>40)go(dx<0?1:-1);x0=null})}
 function nearestIns(){let b=null,bd=1e9;for(const n of S.inserts){const d=Math.abs(n.o-P.T);if(d<bd){bd=d;b=n}}return b}
 function selectIns(id,show){selId=id;const n=S.inserts.find(x=>x.id==id);if(mode!="ins"&&show){mode="ins";document.querySelectorAll(".md").forEach(x=>x.classList.toggle("on",x.dataset.m=="ins"))}drawLine();panel(0);if(n)previewIns(n)}
-function previewIns(n){pause();seekOut(n.o+Math.min(n.d*.75,2.0))}
-function setType(n,type){const t=TYPES[type];n.type=type;n.d=t.d;for(const k of["a","b","c"])if(n[k]==null||!["stamp","laugh","polaroid","strike","slam","sticker","end","quote"].includes(type))n[k]=t[k]!=null?(n[k]||t[k]):n[k]}
-function addIns(type,text,at){
-  pushHist();const t=TYPES[type];const T=at!=null?at:P.T;const m=mapSrc(T);
-  const n={id:uid++,type,t:m.src,d:t.d,a:text||t.a,b:t.b,c:t.c};
-  S.inserts.push(n);selId=n.id;rebuild();previewIns(n);if(mode=="ins")panel(1);toast("✨ "+t.n);return n;
+function previewIns(n){pause();seekOut(n.o+Math.min(n.d*.7,1.8))}
+function strip(n){return JSON.parse(JSON.stringify({d:n.d,icon:n.icon,idea:n.idea,sfx:n.sfx,cam:n.cam,layers:n.layers}))}
+function applyVar(n,j){n.vi=j;Object.assign(n,JSON.parse(JSON.stringify(n.vars[j])));rebuild();previewIns(n)}
+function ctxAround(T,span=4){return S.words.filter(w=>!w.off&&Math.abs(w.os-T)<span).map(w=>w.w).join(" ")}
+async function frameAt(src){
+  // кадр из видео в момент src (без вставок), для ИИ
+  const v=curV();if(!v.videoWidth)return null;
+  const c=document.createElement("canvas");c.width=270;c.height=480;const g=c.getContext("2d");
+  const {vw,vh,sc}=vidRect(v),dw=vw*sc,dh=vh*sc;g.scale(270/1080,480/1920);g.drawImage(v,(1080-dw)/2,(1920-dh)/2,dw,dh);
+  return c.toDataURL("image/jpeg",.7).split(",")[1];
 }
+async function moreIdeas(n){
+  if(n.loading)return;n.loading=true;panel(0);
+  try{
+    const img=await frameAt(n.t);
+    const prompt=`Ты сильный моушн-дизайнер вертикальных рилсов. В этот момент ролика (${n.o.toFixed(1)} с) звучит: "${ctxAround(n.o)}". Кадр приложен. Название ролика: "${S.title}".
+Сейчас здесь вставка: ${JSON.stringify(strip(n))}.
+Придумай 3 СОВСЕМ РАЗНЫХ новых варианта вставки на этот же момент: другая идея, другой смысл, другая композиция и анимация. Каждая по смыслу именно про то, что здесь говорят и видно, с юмором или пользой, не общие слова. Тексты по-русски, коротко. Не закрывай лицо.
+${GFX_DOC}
+Верни ТОЛЬКО JSON {"variants":[вставка,вставка,вставка]} (t не нужен).`;
+    const j=parseJSON(await askAI(prompt,img?[{mime:"image/jpeg",data:img}]:[]));
+    for(const v of j.variants||[]){const c=cleanIns(v,n.t);n.vars.push(strip(c))}
+    n.loading=false;if(n.vars.length>1)applyVar(n,n.vi+1<n.vars.length?n.vi+1:n.vi);panel(1);toast("✨ Новые идеи: листай",1);
+  }catch(e){n.loading=false;panel(0);toast("ИИ не ответил: "+e.message,0,5000)}
+}
+async function aiInsertHere(){await run("придумай и добавь здесь вставку по смыслу этого момента")}
 
-/* ================= команды голосом и текстом ================= */
-function norm(s){return s.toLowerCase().replace(/ё/g,"е")}
-function quoted(s){const m=s.match(/[«"“„']([^»"”']+)[»"”']/);if(m)return m[1].trim();const m2=s.match(/(?:текст(?:ом)?|надпись(?:ю)?|напиши|словами)\s*[:\-]?\s*(.+)$/i);return m2?m2[1].trim():null}
-const TYPE_WORDS=[["hearts",/сердеч|сердц/],["laugh",/смех|ахах|хаха|ржак/],["stamp",/штамп|печать на|печат(ь|ью) /],["polaroid",/полароид|фотк|фото/],["strike",/зачерк/],["slam",/удар|крупн|большими/],["flash",/вспышк|переход/],["sticker",/наклейк|стикер/],["end",/финал|концовк|конечн|титр в конце/],["quote",/цитат/],["bubble",/пузыр|точечк/]];
-function typeIn(s){for(const [k,r] of TYPE_WORDS)if(r.test(s))return k;return null}
-function local(cmd){
-  const s=norm(cmd);const del=/(убер|удал|выреж|убир|сотри|выкин)/.test(s),ret=/(верн|восстанов|не выреза)/.test(s);
-  if(/(отмен|как было)/.test(s)){undo();return true}
-  if(/пауз|тишин/.test(s)){
-    if(ret){if(!S.removePauses){toast("Паузы и так на месте");return true}pushHist();S.removePauses=false;rebuild();toast("↔ Паузы вернул");return true}
-    if(del||/без пауз|короч|сократ/.test(s)){pushHist();const was=R.outDur;S.removePauses=true;rebuild();toast(`✂ Убрал паузы: ${R.pieces.filter(p=>p.gap).length} шт., −${(was-R.outDur).toFixed(1)} с`,1);return true}
-  }
-  if(/субтитр|титры|подпис/.test(s)&&!/финал/.test(s)){
-    let k=null;if(/караок|желт/.test(s))k="karaoke";else if(/по слову|прыж|поп/.test(s))k="pop";else if(/печат|плашк/.test(s))k="type";else if(/неон/.test(s))k="neon";else if(/волн/.test(s))k="wave";else if(del)k="off";else if(/друг|смен|следующ/.test(s))k=SUB_KEYS[(SUB_KEYS.indexOf(S.subStyle)+1)%(SUB_KEYS.length-1)];
-    if(k){pushHist();S.subStyle=k;render(P.T);toast("💬 Субтитры: "+SUBS[k].n);if(mode=="sub")panel(1);return true}
-  }
-  if(/зум|приближ|скач/.test(s)){pushHist();S.jumpZoom=!(del||/выкл|без/.test(s))?true:false;rebuild();toast(S.jumpZoom?"🔍 Зум-скачки включены":"Зум-скачки выключены");return true}
-  if(/(смонтируй|автомонтаж|пересобер|заново|с нуля)/.test(s)){autoMontage();return true}
-  if(/вставк|все встав/.test(s)&&del&&/все/.test(s)){pushHist();S.inserts=[];rebuild();toast("🗑 Все вставки убраны");return true}
-  if(del&&/(слово|фраз|кусок|момент|где)/.test(s)){
-    const q=norm(quoted(cmd)||s.replace(/.*(слово|фразу|фраза|кусок|где)\s*/,""));const qs=q.split(/\s+/).filter(Boolean);
-    const W=S.words;for(let i=0;i<W.length;i++){let ok=true;for(let j=0;j<qs.length;j++){if(!W[i+j]||!norm(W[i+j].w).replace(/[.,!?]/g,"").startsWith(qs[j].replace(/[.,!?]/g,"").slice(0,Math.max(3,qs[j].length-2)))){ok=false;break}}
-      if(ok){pushHist();const a=W[i],b=W[i+qs.length-1];S.cuts.push({s:Math.max(0,a.s-0.04),e:b.e+0.04});rebuild();toast(`✂ Вырезал «${qs.join(" ")}»`,1);return true}}
-  }
-  const ty=typeIn(s);
-  if(/(замен|поменя|друг)/.test(s)&&/вставк|эту|это/.test(s)){
-    const n=S.inserts.find(x=>x.id==selId)||nearestIns();if(!n)return false;pushHist();
-    const nt=ty&&ty!=n.type?ty:TYPE_KEYS[(TYPE_KEYS.indexOf(n.type)+1)%TYPE_KEYS.length];setType(n,nt);const q=quoted(cmd);if(q)n.a=q;rebuild();selectIns(n.id,false);toast("🔁 "+TYPES[nt].n,1);return true}
-  if(del&&(/вставк|эту|это/.test(s)||ty)){
-    let n=ty?S.inserts.filter(x=>x.type==ty).sort((a,b)=>Math.abs(a.o-P.T)-Math.abs(b.o-P.T))[0]:(S.inserts.find(x=>x.id==selId)||nearestIns());
-    if(n){pushHist();S.inserts=S.inserts.filter(x=>x!=n);selId=null;rebuild();toast("🗑 Убрал: "+TYPES[n.type].n);if(mode=="ins")panel(0);return true}
-  }
-  if(ty&&/(добав|встав|постав|сделай|нужн|хочу|давай|^\S+$)/.test(s)||ty&&!del){
-    const n=addIns(ty,quoted(cmd));return !!n;
-  }
-  const q=quoted(cmd);
-  if(q&&/(текст|надпис|напиши)/.test(s)){const n=S.inserts.find(x=>x.id==selId)||nearestIns();if(n){pushHist();n.a=q;rebuild();toast("✏️ Текст заменил");if(mode=="ins")panel(0);return true}}
-  return false;
-}
+/* ================= правки голосом и текстом: решает ИИ ================= */
+function norm(s){return String(s).toLowerCase().replace(/ё/g,"е")}
 async function run(cmd,real){
   cmd=(real||cmd||"").trim();if(!cmd)return;$("#cmd").value="";
-  toast("🤖 ИИ думает над правкой…",1,20000);
+  if(!S.src){toast("Сначала загрузи видео");return}
+  toast("🤖 ИИ думает над правкой…",1,30000);
   try{
-    const plan={duration_out:+R.outDur.toFixed(2),playhead_out:+P.T.toFixed(2),selected_id:selId,removePauses:S.removePauses,jumpZoom:S.jumpZoom,subStyle:S.subStyle,
-      inserts:S.inserts.map(n=>({id:n.id,type:n.type,t_out:+n.o.toFixed(2),d:+n.d.toFixed(2),a:n.a,b:n.b,c:n.c})),
+    const plan={title:S.title,duration_out:+R.outDur.toFixed(2),playhead_out:+P.T.toFixed(2),selected_id:selId,removePauses:S.removePauses,jumpZoom:S.jumpZoom,subStyle:S.subStyle,
+      inserts:S.inserts.map(n=>({id:n.id,t_out:+n.o.toFixed(2),...strip(n)})),
       words:S.words.filter(w=>!w.off).map(w=>w.w+"@"+w.os.toFixed(2)).join(" ")};
-    const prompt=`Ты монтажёр в программе для вертикальных роликов в стиле «полный комплекс вставок». Пользователь просит правку: "${cmd}".
-Текущий монтаж (время в секундах готового ролика): ${JSON.stringify(plan)}
-Типы вставок: bubble (пузырь «печатает» в начале), quote (цитата, слова появляются по одному; b = слово для подсветки), stamp (красный штамп с ударом; a = 2-3 слова КАПСОМ), hearts (летящие сердечки), laugh (смех: зум, буквы a, шкала), polaroid (фото-рамка с подписью a), strike (a = ярлык, b = было, зачёркивается, c = стало), slam (огромный текст a с ударом, перенос \\n), flash (белая вспышка-переход), sticker (круглая наклейка: a = 1-2 символа, b = подпись), end (финальная карточка: a = мелкая строка, b = крупная).
-Стили субтитров: karaoke, pop, type, neon, wave, off.
-Пойми, что человек хочет, и сделай это хорошо, как сделал бы сильный монтажёр: точно по словам и времени, тексты вставок живые и по-русски, вставки не накладываются.
+    const img=await frameAt(mapSrc(P.T).src);
+    const prompt=`Ты сильный монтажёр и моушн-дизайнер вертикальных рилсов. Пользователь просит правку: "${cmd}".
+Текущий монтаж (время в секундах готового ролика, кадр в момент playhead приложен): ${JSON.stringify(plan)}
+${GFX_DOC}
+Стили субтитров: ${SUB_KEYS.join(", ")}.
+Пойми, чего человек хочет, и сделай это на уровне хорошего монтажёра, по смыслу ролика. Новые вставки придумывай уникальные, про то, что говорится и видно.
 Верни ТОЛЬКО JSON {"ops":[...],"say":"коротко по-русски, что сделал"} где op:
-{"op":"add","type":..,"t_out":сек,"d":сек,"a":..,"b":..,"c":..}
-{"op":"set","id":..,"type":..,"t_out":..,"d":..,"a":..,"b":..,"c":..} (любые поля по желанию)
+{"op":"add","t_out":сек, ...поля вставки}
+{"op":"set","id":..,"t_out":.., ...любые поля вставки}  (layers заменяются целиком)
 {"op":"del","id":..}
-{"op":"cut","from":сек,"to":сек} вырезать кусок
-{"op":"pauses","on":true|false} вырезать паузы
-{"op":"zoom","on":true|false} зум-скачки на склейках
+{"op":"cut","from":сек,"to":сек}
+{"op":"pauses","on":true|false}
+{"op":"zoom","on":true|false}
 {"op":"sub","style":..}
-{"op":"undo"} вернуть как было`;
-    const j=parseJSON(await askAI(prompt,null));
+{"op":"undo"}`;
+    const j=parseJSON(await askAI(prompt,img?[{mime:"image/jpeg",data:img}]:[]));
     pushHist();let changed=null;
     for(const o of j.ops||[]){
       if(o.op=="undo"){hist.pop();undo();continue}
-      if(o.op=="add"&&TYPES[o.type]){const t=TYPES[o.type];const n={id:uid++,type:o.type,t:mapSrc(isFinite(o.t_out)?o.t_out:P.T).src,d:isFinite(o.d)&&o.d>0.2?+o.d:t.d,a:o.a??t.a,b:o.b??t.b,c:o.c??t.c};S.inserts.push(n);changed=n}
+      if(o.op=="add"){const n=cleanIns({...o,t:mapSrc(isFinite(o.t_out)?o.t_out:P.T).src});n.id=uid++;S.inserts.push(n);changed=n}
       if(o.op=="del")S.inserts=S.inserts.filter(x=>x.id!=o.id);
-      if(o.op=="set"){const n=S.inserts.find(x=>x.id==o.id);if(n){if(o.type&&TYPES[o.type])setType(n,o.type);if(isFinite(o.t_out))n.t=mapSrc(o.t_out).src;if(isFinite(o.d)&&o.d>0.2)n.d=+o.d;for(const k of["a","b","c"])if(o[k]!=null)n[k]=o[k];changed=n}}
+      if(o.op=="set"){const n=S.inserts.find(x=>x.id==o.id);if(n){const c=cleanIns({...strip(n),...o,t:isFinite(o.t_out)?mapSrc(o.t_out).src:n.t});Object.assign(n,{t:c.t,d:c.d,icon:c.icon,idea:c.idea,sfx:c.sfx,cam:c.cam,layers:c.layers});n.vars=null;n.vi=null;changed=n}}
       if(o.op=="cut"&&isFinite(o.from)&&isFinite(o.to)&&o.to>o.from)S.cuts.push({s:mapSrc(o.from).src,e:mapSrc(o.to).src});
       if(o.op=="pauses")S.removePauses=!!o.on;
       if(o.op=="zoom")S.jumpZoom=!!o.on;
       if(o.op=="sub"&&SUBS[o.style])S.subStyle=o.style;
     }
     rebuild();if(changed){selId=changed.id;drawLine();previewIns(changed)}else render(P.T);panel(0);
-    toast("🤖 "+(j.say||"Готово"),1,4000);
-  }catch(e){
-    if(local(cmd)){panel(0);toast("Сервер ИИ не ответил, сделал по-простому",0,4000);return}
-    toast("ИИ не ответил: "+e.message,0,5000);
-  }
+    toast("🤖 "+(j.say||"Готово"),1,4500);
+  }catch(e){toast("ИИ не ответил: "+e.message,0,5000)}
 }
 $("#send").onclick=()=>run($("#cmd").value);
 $("#cmd").addEventListener("keydown",e=>{if(e.key=="Enter")run($("#cmd").value)});
+
 let REC=null;
 let DICT=null;
 $("#mic").onclick=()=>{
@@ -674,37 +690,12 @@ let tT=0;
 function toast(s,ai,ms=2600){const t=$("#toast");t.textContent=s;t.className="on"+(ai?" ai":"");clearTimeout(tT);tT=setTimeout(()=>t.className="",ms)}
 function busy(on,t,s,prog){const b=$("#busy");b.classList.toggle("on",!!on);if(t)$("#busyT").textContent=t;$("#busyS").textContent=s||"";const bar=$("#busyBar");if(prog!=null){bar.classList.add("det");bar.firstChild.style.width=(prog*100)+"%"}else{bar.classList.remove("det");bar.firstChild.style.width=""}}
 
-/* ================= ИИ: Gemini ================= */
-let CFG=LS.get("mnt_cfg",{key:"",proxy:"",user:"",pass:"",model:""});
+/* ================= ИИ: Gemini через сервер Помощника ================= */
 const PUBLIC_AI="https://pomoshnik.jagser.deno.net/montage";
-const hasAI=()=>true;
-$("#bSet").onclick=()=>{$("#sKey").value=CFG.key;$("#sProxy").value=CFG.proxy;$("#sUser").value=CFG.user;$("#sPass").value=CFG.pass;$("#sheet").classList.add("on")};
-$("#sClose").onclick=()=>$("#sheet").classList.remove("on");
-$("#sSave").onclick=()=>{CFG={...CFG,key:$("#sKey").value.trim(),proxy:$("#sProxy").value.trim().replace(/\/$/,""),user:$("#sUser").value.trim(),pass:$("#sPass").value,model:""};LS.set("mnt_cfg",CFG);$("#sheet").classList.remove("on");toast("Сохранено");if(pendingFile){const f=pendingFile;pendingFile=null;analyze(f)}};
-async function pickModel(){
-  if(CFG.model)return CFG.model;
-  try{const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key="+encodeURIComponent(CFG.key));const j=await r.json();
-    const c=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes("generateContent")).map(m=>m.name.replace("models/","")).filter(n=>/^gemini-\d+(\.\d+)?-flash(-preview)?(-\d\d-\d\d(\d\d)?)?$/.test(n)&&!/lite|image|tts|live|audio/.test(n));
-    const v=n=>parseFloat(n.match(/gemini-(\d+(\.\d+)?)/)[1])*10-(/preview/.test(n)?1:0);
-    c.sort((a,b)=>v(b)-v(a));CFG.model=c[0]||"gemini-2.5-flash";LS.set("mnt_cfg",CFG);
-  }catch(e){CFG.model="gemini-2.5-flash"}
-  return CFG.model;
-}
-async function askAI(prompt,blob){
-  if(!CFG.key&&!CFG.proxy){
-    const r=await fetch(PUBLIC_AI,{method:"POST",headers:{"X-Meta":encodeURIComponent(JSON.stringify({mime:blob?blob.type:"text/plain",prompt}))},body:blob||new Blob([],{type:"application/octet-stream"})});
-    const j=await r.json().catch(()=>({error:"сервер не ответил"}));if(!r.ok||j.error)throw new Error(j.error||r.status);return j.text||"";
-  }
-  if(CFG.proxy){
-    const r=await fetch(CFG.proxy+"/analyze",{method:"POST",headers:{"X-User":encodeURIComponent(CFG.user),"X-Pass":encodeURIComponent(CFG.pass),"X-Meta":encodeURIComponent(JSON.stringify({mime:blob?blob.type:"text/plain",prompt}))},body:blob||new Blob([" "],{type:"text/plain"})});
-    const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j.text||j.result||JSON.stringify(j);
-  }
-  const model=await pickModel();
-  const parts=[{text:prompt}];
-  if(blob)parts.unshift({inline_data:{mime_type:blob.type,data:await b64(blob)}});
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(CFG.key)}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{role:"user",parts}],generationConfig:{responseMimeType:"application/json",temperature:0.4}})});
-  const j=await r.json();if(!r.ok)throw new Error((j.error&&j.error.message)||r.status);
-  return (j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||"").join("");
+async function askAI(prompt,parts=[]){
+  const r=await fetch(PUBLIC_AI,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({prompt,parts})});
+  const j=await r.json().catch(()=>({error:"сервер не ответил"}));
+  if(!r.ok||j.error)throw new Error(j.error||r.status);return j.text||"";
 }
 function b64(blob){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(String(fr.result).split(",")[1]);fr.onerror=rej;fr.readAsDataURL(blob)})}
 function parseJSON(t){t=String(t).trim().replace(/^```(json)?/,"").replace(/```$/,"");const a=t.indexOf("{"),b=t.lastIndexOf("}");return JSON.parse(t.slice(a,b+1))}
@@ -712,7 +703,7 @@ async function audioWav(file){
   const buf=await file.arrayBuffer();
   const tmp=new (window.AudioContext||window.webkitAudioContext)();
   const ab=await tmp.decodeAudioData(buf);tmp.close&&tmp.close();
-  const rate=ab.duration<540?16000:8000;
+  const rate=ab.duration<300?16000:8000;
   const off=new OfflineAudioContext(1,Math.ceil(ab.duration*rate),rate);const s=off.createBufferSource();s.buffer=ab;s.connect(off.destination);s.start();
   const r=await off.startRendering();const d=r.getChannelData(0);
   const out=new DataView(new ArrayBuffer(44+d.length*2));const W=(o,s)=>{for(let i=0;i<s.length;i++)out.setUint8(o+i,s.charCodeAt(i))};
@@ -720,58 +711,64 @@ async function audioWav(file){
   for(let i=0;i<d.length;i++)out.setInt16(44+i*2,clamp(d[i],-1,1)*32767,true);
   return new Blob([out],{type:"audio/wav"});
 }
-const PLAN_PROMPT=D=>`Ты монтажёр коротких вертикальных роликов в стиле «полный комплекс вставок» (как популярные рилсы «монтаж через Claude»). Это звуковая дорожка ролика длиной ${D.toFixed(1)} с.
-Верни ТОЛЬКО JSON такого вида:
-{"lang":"код языка речи","title":"2-3 слова о чём ролик",
-"words":[{"w":"слово","s":начало_сек,"e":конец_сек}],
-"keep":[{"s":сек,"e":сек,"why":"смех/реакция/важная пауза"}],
-"inserts":[{"type":"...","t":сек,"a":"текст","b":"текст","c":"текст"}]}
-Правила:
-1) words: субтитры НА РУССКОМ. Если речь на другом языке, переведи живо и коротко, по смыслу каждой фразы, и разложи слова перевода по времени этой фразы. Время в секундах с точностью 0.05, по реальному звуку. Слова не пересекаются.
-2) keep: все места смеха, ахов, реакций, музыкальных акцентов, которые нельзя вырезать как паузы.
-3) inserts: 1 вставка на каждые 2-3 секунды, не накладываются друг на друга, точно на нужное слово или звук. Типы:
-bubble: пузырь «печатает…» в самом начале, когда человек начинает рассказ (t около 0).
-quote: карточка-цитата, слова появляются по одному: ставь на самую яркую фразу; b = ключевое слово этой фразы для подсветки.
-stamp: красный штамп с ударом и тряской на итог/панчлайн; a = 2-3 слова КАПСОМ.
-hearts: летящие сердечки на слова о любви, сердце, нежности.
-laugh: на начало смеха; a = "АХАХАХА" или подходящее.
-polaroid: фото-рамка с подписью a (2-3 слова) на фразу-воспоминание или важный момент.
-strike: зачёркивание: a = ярлык КАПСОМ (напр. «ПО ЕГО МНЕНИЮ»), b = что было, c = чем стало; на противопоставление.
-slam: огромный текст с ударом на эмоциональный выкрик; a = 1-3 слова КАПСОМ, перенос строки \\n.
-flash: белая вспышка-переход на смену сцены или резкую смену темы.
-sticker: круглая наклейка; a = 1-2 символа (V, !, ?, 100, ♥), b = подпись одним словом КАПСОМ; на жест или реакцию.
-end: финальная карточка в последние 1.3 с; a = «ИСТОРИЯ ПРО» или похожее, b = 1-2 слова КАПСОМ.
-Все тексты вставок по-русски.`;
+async function grabFrames(url,dur,maxN=32){
+  // кадры ролика для ИИ: равномерно по всей длине, 270x480
+  const v=document.createElement("video");v.muted=true;v.playsInline=true;v.preload="auto";v.src=url;
+  await new Promise((r,j)=>{v.onloadeddata=r;v.onerror=()=>j(new Error("кадры не читаются"))});
+  const n=Math.min(maxN,Math.max(4,Math.ceil(dur/1.0))),c=document.createElement("canvas");c.width=270;c.height=480;const g=c.getContext("2d");
+  const out=[];
+  for(let i=0;i<n;i++){
+    const t=Math.min(dur-0.05,(i+0.5)*dur/n);
+    await new Promise(r=>{v.onseeked=r;v.currentTime=t});
+    const vw=v.videoWidth,vh=v.videoHeight,sc=Math.max(270/vw,480/vh);g.drawImage(v,(270-vw*sc)/2,(480-vh*sc)/2,vw*sc,vh*sc);
+    out.push({t,data:c.toDataURL("image/jpeg",.6).split(",")[1]});
+    busy(1,"ИИ смотрит ролик…","Кадры: "+(i+1)+" из "+n,(i+1)/n*.3);
+  }
+  v.removeAttribute("src");v.load();
+  return out;
+}
+const PLAN_PROMPT=(D,frames)=>`Ты лучший монтажёр и моушн-дизайнер вертикальных рилсов, уровень популярных роликов «монтаж через Claude»: каждая графическая вставка что-то добавляет к смыслу, шутит, поясняет, подчёркивает эмоцию или указывает на предмет в кадре.
+Приложены звук ролика (${D.toFixed(1)} с) и кадры с временем: ${frames.map(f=>f.t.toFixed(1)).join(", ")} с.
+Сначала пойми ролик: о чём он, кто говорит, где лицо и важные предметы в кадре, настроение, где смешно, где пик. Потом смонтируй.
+Верни ТОЛЬКО JSON:
+{"title":"о чём ролик, 2-4 слова","lang":"язык речи","palette":["#hex","#hex","#hex"],
+"words":[{"w":"слово","s":сек,"e":сек}],
+"keep":[{"s":сек,"e":сек}],
+"inserts":[вставка,...]}
+words: субтитры НА РУССКОМ по реальному звуку (если речь не русская, живой короткий перевод каждой фразы, слова перевода разложены по времени фразы).
+keep: смех, реакции, важные паузы, которые нельзя вырезать.
+inserts: одна вставка на каждые 2-4 секунды, не накладываются. Правила:
+- Каждая вставка придумана именно под этот момент ролика: что сказано и что видно. Никаких общих фраз, никаких шаблонов.
+- Разные идеи по ходу ролика: заголовок-крючок в первые 1.5 с, подписи и ярлыки к людям и предметам со стрелками, крупные выкрики, ироничные комментарии, эмодзи-реакции, счётчики и рейтинги, окно-лупа на деталь, ключевые слова цитатой, финальный панчлайн.
+- Единая палитра ролика (palette), у текстов обводка или плашка для читаемости.
+- Не закрывай лицо: смотри на кадры, ставь графику в свободные места. Субтитры внизу (y 1380-1500), туда не ставь.
+- Анимации и композиция меняются от вставки к вставке; удары (slam, stamp, shake, zoom, flash) только на пиках.
+- Тексты по-русски, короткие, живые.
+${GFX_DOC}`;
+let lastPlan=null;
 async function analyze(file){
-  if(!hasAI()){pendingFile=file;busy(0);$("#bSet").click();toast("Для автомонтажа нужен ключ Gemini или прослойка");return}
   try{
-    busy(1,"Слушаю звук…","Достаю дорожку из видео");
+    busy(1,"ИИ смотрит ролик…","Готовлю кадры",0);
+    const frames=await grabFrames(S.src,S.dur);
+    busy(1,"ИИ слушает ролик…","Достаю звук",.35);
     const wav=await audioWav(file);
-    busy(1,"ИИ разбирает ролик…","Расшифровка, перевод, план вставок");
-    const t=await askAI(PLAN_PROMPT(S.dur),wav);const j=parseJSON(t);
-    applyPlan(j);busy(0);toast("✨ Смонтировано: "+S.inserts.length+" вставок",1);
+    if(wav.size>14e6)throw new Error("ролик слишком длинный, до 5 минут");
+    const parts=[{mime:"audio/wav",data:await b64(wav)}];
+    for(const f of frames){parts.push({text:"кадр t="+f.t.toFixed(1)+" с"});parts.push({mime:"image/jpeg",data:f.data})}
+    busy(1,"ИИ монтирует…","Понимает смысл, пишет субтитры, придумывает вставки. Обычно до минуты.",.5);
+    const t=await askAI(PLAN_PROMPT(S.dur,frames),parts);
+    applyPlan(parseJSON(t));busy(0);toast("✨ Смонтировано: "+S.inserts.length+" вставок",1,4000);
   }catch(e){busy(0);toast("Ошибка: "+e.message,0,6000);console.error(e)}
 }
-let pendingFile=null,lastPlan=null;
 function applyPlan(j){
   lastPlan=j;pushHist();
-  S.words=(j.words||[]).filter(w=>w&&w.w&&isFinite(w.s)).map(w=>({w:String(w.w),s:+w.s,e:isFinite(w.e)&&w.e>w.s?+w.e:+w.s+0.3}));
-  S.words.sort((a,b)=>a.s-b.s);
+  S.words=(j.words||[]).filter(w=>w&&w.w&&isFinite(w.s)).map(w=>({w:String(w.w),s:+w.s,e:isFinite(w.e)&&w.e>w.s?+w.e:+w.s+0.3})).sort((a,b)=>a.s-b.s);
   S.keep=(j.keep||[]).filter(k=>isFinite(k.s)&&isFinite(k.e)).map(k=>({s:+k.s,e:+k.e}));
-  S.inserts=(j.inserts||[]).filter(n=>TYPES[n.type]&&isFinite(n.t)).map(n=>{const t=TYPES[n.type];return{id:uid++,type:n.type,t:clamp(+n.t,0,S.dur-0.2),d:isFinite(n.d)&&n.d>0.2?+n.d:t.d,a:n.a||t.a,b:n.b||t.b,c:n.c||t.c}});
-  // концовка всегда в конце
-  for(const n of S.inserts)if(n.type=="end")n.t=Math.max(0,S.dur-n.d);
+  S.inserts=(j.inserts||[]).filter(n=>n&&isFinite(n.t)).map(n=>cleanIns(n));
   S.cuts=[];S.title=j.title||"";
-  fixOverlaps();rebuild();panel(0);seekOut(0);
+  rebuild();panel(0);seekOut(0);
 }
-function fixOverlaps(){
-  const top=S.inserts.filter(n=>n.type!="hearts"&&n.type!="flash").sort((a,b)=>a.t-b.t);
-  for(let i=1;i<top.length;i++){const p=top[i-1];if(top[i].t<p.t+p.d){p.d=Math.max(0.6,top[i].t-p.t)}}
-}
-async function autoMontage(){
-  if(S.src&&S.file){analyze(S.file);return}
-  if(lastPlan){applyPlan(lastPlan);toast("✨ Собрал заново",1);return}
-}
+async function autoMontage(){if(S.file)analyze(S.file)}
 
 /* ================= загрузка видео ================= */
 $("#file").onchange=async e=>{
@@ -823,29 +820,17 @@ async function saveFile(blob,name){
 }
 function setRes(q){Q=q/1080;cv.width=Math.round(1080*Q);cv.height=Math.round(1920*Q)}
 
-/* ================= демо-ролик ================= */
-const DEMO={title:"дядечка",
-words:[["он",0,.3],["мне",.317,.6],["говорит",.633,.95],["этот",1.1,1.4],["дядечка",1.45,1.75],["не",1.8,2.1],["уйдёт",2.15,2.45],["из",2.5,2.8],["сердца",2.85,3.15],["так",3.2,3.4],["и",3.45,3.65],["сказал",3.7,4.0],["сердце",4.1,4.7],["играет",4.75,5.4],["помни",7.7,8.25],["меня",8.3,8.9],["возомнил",9.1,9.85],["себя",9.9,10.6],["молодым",10.7,11.5],["ой,",12.75,13.1],["не",13.15,13.5],["могу",13.55,13.9],["так",17.95,18.25],["говорят",18.275,18.9]].map(([w,s,e])=>({w,s,e})),
-keep:[{s:4.85,e:7.6},{s:13.9,e:17.9},{s:18.9,e:19.9}],
-inserts:[{type:"bubble",t:.05},{type:"quote",t:1.05,d:2.4,b:"сердца"},{type:"stamp",t:3.7,d:1.3,a:"ТАК И СКАЗАЛ"},{type:"hearts",t:4.1,d:2.4},{type:"laugh",t:5.0},{type:"polaroid",t:7.65,d:1.35,a:"помни меня"},{type:"strike",t:9.05,a:"ПО ЕГО МНЕНИЮ",b:"дядечка",c:"молодой парень"},{type:"slam",t:12.7,a:"ОЙ,\nНЕ МОГУ"},{type:"flash",t:14.7},{type:"sticker",t:15.0,a:"V",b:"МИР"},{type:"end",t:18.5,d:1.38,a:"ИСТОРИЯ ПРО",b:"ДЯДЕЧКУ"}]};
-
 /* ================= старт ================= */
 async function loadFonts(){
   const L=[["InterBlack","a/Inter-Black.otf",{weight:"900"}],["InterBold","a/Inter-Bold.otf",{weight:"700"}],["LoraI","a/Lora-Italic-Variable.ttf",{style:"italic"}]];
   await Promise.all(L.map(([n,u,o])=>new FontFace(n,`url(${u})`,o).load().then(ff=>document.fonts.add(ff)).catch(()=>{})));
 }
-$("#stage").addEventListener("click",e=>{if(e.target.closest("#busy")||e.target.closest("#demoTag"))return;initAudio();P.playing?pause():play()});
+$("#stage").addEventListener("click",e=>{if(e.target.closest("#busy")||!S.src)return;initAudio();P.playing?pause():play()});
 document.addEventListener("visibilitychange",()=>{if(document.hidden&&P.playing&&!P.rec)pause()});
 window.addEventListener("resize",updHead);
 (async()=>{
-  busy(1,"Загрузка…");
   await loadFonts();
-  await loadSrc("a/demo.mp4");
-  S.name="демо-ролик";
-  const j={...DEMO,inserts:DEMO.inserts.map(n=>({...TYPES[n.type],...n}))};
-  for(const n of j.inserts){delete n.n;delete n.e;delete n.sfx}
-  applyPlan(j);
-  hist=[];rebuild();panel(0);busy(0);seekOut(0);
+  rebuild();panel(0);
   requestAnimationFrame(step);
   if(window.claude&&window.claude.use){window.claude.use("dictation").then(d=>{if(!d)return;DICT=d;let acc="";d.onPartial(({text})=>{$("#cmd").value=acc+text});d.onFinal(({text})=>{acc+=text+" ";$("#cmd").value=acc});d.onState(({state})=>{if(state=="idle"){const t=acc.trim();acc="";REC=null;$("#mic").classList.remove("on");if(t)run(t)}})}).catch(()=>{})}
   if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
