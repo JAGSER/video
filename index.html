@@ -173,7 +173,7 @@ const SUBS={
 };
 const SUB_KEYS=Object.keys(SUBS);
 const GFX_DOC=`Холст 1080x1920 (x вправо, y вниз). Вставка (insert):
-{"t":сек_начала,"d":длительность,"icon":"один эмодзи для таймлайна","idea":"зачем эта вставка, 3-6 слов","sfx":"pop|thud|whoosh|none",
+{"t":сек_начала,"d":длительность,"icon":"один эмодзи для таймлайна","idea":"зачем эта вставка, 3-6 слов","sfx":"pop|thud|none",
  "cam":{"zoom":1.0-1.35,"zoomAt":сек_от_начала,"shake":0-30,"shakeAt":сек,"flash":true|false,"dim":0-0.7},
  "layers":[слой,...]}
 Слои (у всех: "x","y" центр, "rot" градусы, "at" задержка появления от начала вставки, "dur" сколько живёт (по умолчанию до конца),
@@ -189,12 +189,12 @@ function animIn(kind,q){
   const r={dx:0,dy:0,sc:1,rot:0,al:1};q=clamp(q);
   switch(kind){
     case"pop":r.sc=E.back(q,2.4);r.al=clamp(q*3);break;
-    case"slam":r.sc=lerp(2.4,1,E.in4(clamp(q/.6)));r.al=clamp(q*4);break;
-    case"stamp":r.sc=lerp(2.6,1,E.in4(clamp(q/.6)));r.rot=lerp(-16,0,E.in4(clamp(q/.6)));r.al=clamp(q*4);break;
-    case"drop":r.dy=-420*(1-E.back(q,1.8));r.al=clamp(q*3);break;
+    case"slam":r.sc=lerp(1.45,1,E.out3(clamp(q/.6)));r.al=clamp(q*3);break;
+    case"stamp":r.sc=lerp(1.5,1,E.out3(clamp(q/.6)));r.rot=lerp(-10,0,E.out3(clamp(q/.6)));r.al=clamp(q*3);break;
+    case"drop":r.dy=-160*(1-E.back(q,1.4));r.al=clamp(q*3);break;
     case"rise":r.dy=140*(1-E.out3(q));r.al=q;break;
-    case"left":r.dx=-760*(1-E.out3(q));break;
-    case"right":r.dx=760*(1-E.out3(q));break;
+    case"left":r.dx=-220*(1-E.out3(q));r.al=q;break;
+    case"right":r.dx=220*(1-E.out3(q));r.al=q;break;
     case"spin":r.rot=-200*(1-E.out3(q));r.sc=E.out3(q);break;
     case"fade":r.al=q;break;
   }
@@ -218,7 +218,7 @@ function loopFx(kind,t){
   if(kind=="pulse")r.sc=1+Math.sin(t*7)*.05;
   if(kind=="wiggle")r.rot=Math.sin(t*9)*4;
   if(kind=="spin")r.rot=t*120;
-  if(kind=="shake"){r.dx=Math.sin(t*61)*6;r.dy=Math.cos(t*53)*6}
+  
   return r;
 }
 function star(cx,cy,r1,r2,n=5){ctx.beginPath();for(let i=0;i<n*2;i++){const r=i%2?r2:r1,a=-Math.PI/2+i*Math.PI/n;ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r)}ctx.closePath()}
@@ -300,8 +300,8 @@ function camera(T,segIdx){
   let z=(S.jumpZoom&&segIdx%2)?1.12:1,x=0,y=0;
   for(const n of active(T)){
     const c=n.cam||{};const p=T-n.o,d=n.d;
-    if(c.zoom&&c.zoom!=1){const za=+c.zoomAt||0;z*=lerp(1,clamp(+c.zoom,.8,1.6),E.out3((p-za)/.25)*(1-E.sine((p-(d-.3))/.3)))}
-    if(c.shake){const sa=+c.shakeAt||0;if(p>sa&&p<sa+.32){const k=Math.floor((p-sa)/.04);const s=clamp(+c.shake,0,40);x+=(k%2?-1:1)*s;y+=(k%3-1)*s*.5}}
+    if(c.zoom&&c.zoom!=1){const za=+c.zoomAt||0;z*=lerp(1,clamp(+c.zoom,1,1.25),E.out3((p-za)/.25)*(1-E.sine((p-(d-.3))/.3)))}
+    if(c.shake){const sa=+c.shakeAt||0;if(p>sa&&p<sa+.24){const k=Math.floor((p-sa)/.04);const s=clamp(+c.shake,0,14);x+=(k%2?-1:1)*s;y+=(k%3-1)*s*.5}}
   }
   return{z,x,y};
 }
@@ -313,7 +313,8 @@ function drawIns(n,p,T){
     if(lp<0||lp>ld)return;
     const a=animIn(L.in||"pop",lp/.3),o=animOut(L.out||"fade",(lp-(ld-.25))/.25),l=loopFx(L.loop||"none",lp);
     ctx.save();
-    ctx.translate((+L.x||540)+a.dx+o.dx+l.dx,(+L.y||600)+a.dy+o.dy+l.dy);
+    if(n._dv!==n._fv)n._dy=insShift(n),n._dv=n._fv;
+    ctx.translate((+L.x||540)+a.dx+o.dx+l.dx,(+L.y||600)+(L.fx=='rain'?0:n._dy||0)+a.dy+o.dy+l.dy);
     ctx.rotate(((+L.rot||0)+a.rot+o.rot+l.rot)*Math.PI/180);
     const sc=a.sc*o.sc*l.sc;ctx.scale(sc,sc);
     ctx.globalAlpha=clamp(a.al*o.al);
@@ -323,7 +324,30 @@ function drawIns(n,p,T){
     else if(L.k=="frame")drawFrame(L);
     ctx.restore();
   });
-  if(c.flash){const a=p<.08?p/.08:1-E.out2((p-.08)/.3);if(a>0){ctx.save();ctx.globalAlpha=clamp(a);ctx.fillStyle="#fff";ctx.fillRect(0,0,1080,1920);ctx.restore()}}
+  if(c.flash){const a=p<.06?p/.06:1-E.out2((p-.06)/.2);if(a>0){ctx.save();ctx.globalAlpha=clamp(a)*.45;ctx.fillStyle="#fff";ctx.fillRect(0,0,1080,1920);ctx.restore()}}
+}
+function faceAt(t){let b=null,bd=1e9;for(const f of S.faces||[]){const d=Math.abs(f.t-t);if(d<bd){bd=d;b=f}}return bd<1.2?b:null}
+function faceBox(n){
+  // общий прямоугольник лица на всё время вставки, с запасом
+  let u=null;for(let t=n.t;t<=n.t+n.d+0.01;t+=0.4){const f=faceAt(t);if(!f)continue;const r={x:f.x-50,y:f.y-70,x2:f.x+f.w+50,y2:f.y+f.h+50};u=u?{x:Math.min(u.x,r.x),y:Math.min(u.y,r.y),x2:Math.max(u.x2,r.x2),y2:Math.max(u.y2,r.y2)}:r}
+  return u;
+}
+function layerSize(L){
+  if(L.k=="text"){const font=["b","m","l"].includes(L.font)?L.font:"b",px=clamp(+L.size||80,16,260),lines=wrapLines(L.text||"",px,font,clamp(+L.maxW||960,120,1040));const pad=L.box?clamp(+L.box.pad||24,0,80):0;return{w:Math.max(...lines.map(l=>tw(l.join(" "),px,font)))+pad*2,h:lines.length*px*1.12+pad*1.4}}
+  if(L.k=="emoji"){if(L.fx&&L.fx!="none")return null;const s=clamp(+L.size||120,20,400);return{w:s,h:s}}
+  if(L.k=="frame")return{w:(+L.w||420)+24,h:(+L.h||420)+24+(L.caption?70:0)};
+  return null;
+}
+function shapeSize(L){if(L.k!="shape"||L.sh=="arrow"||L.sh=="line")return null;const w=+L.w||200;return{w,h:+L.h||w}}
+function insShift(n){
+  // сдвиг всей вставки по вертикали, чтобы её элементы не закрывали лицо
+  const fb=n._fb;if(!fb)return 0;let u=null;
+  for(const L of n.layers||[]){const sz=layerSize(L)||shapeSize(L);if(!sz)continue;const x=+L.x||540,y=+L.y||600;const r={x:x-sz.w/2,x2:x+sz.w/2,y:y-sz.h/2,y2:y+sz.h/2};u=u?{x:Math.min(u.x,r.x),x2:Math.max(u.x2,r.x2),y:Math.min(u.y,r.y),y2:Math.max(u.y2,r.y2)}:r}
+  if(!u||u.x2<fb.x||u.x>fb.x2||u.y2<fb.y||u.y>fb.y2)return 0;
+  const H=u.y2-u.y;
+  if(fb.y2+20+H<1340)return fb.y2+20-u.y;
+  if(fb.y-20-H>90)return fb.y-20-u.y2;
+  return 1340-u.y2;
 }
 function cleanIns(o,fallbackT){
   const n={id:o.id||uid++,t:isFinite(o.t)?clamp(+o.t,0,Math.max(0,S.dur-0.2)):fallbackT||0,d:clamp(isFinite(o.d)?+o.d:2,0.3,8),icon:String(o.icon||"✨").slice(0,4),idea:String(o.idea||""),sfx:["pop","thud","whoosh","none"].includes(o.sfx)?o.sfx:"pop",cam:o.cam&&typeof o.cam=="object"?o.cam:{},layers:Array.isArray(o.layers)?o.layers.slice(0,12):[]};
@@ -365,7 +389,7 @@ function rebuild(){
   for(const g of segs){g.o=o;o+=g.e-g.s}
   R={pieces,segs,outDur:o};
   for(const x of S.words){x.os=mapOut(x.s);x.oe=mapOut(x.e);x.off=x.del||!inKept(x.s+Math.min(0.05,(x.e-x.s)/2))}
-  for(const n of S.inserts){n.o=mapOut(n.t)}
+  for(const n of S.inserts){n.o=mapOut(n.t);n._fb=faceBox(n);n._fv=(n._fv||0)+1}
   S.inserts.sort((a,b)=>a.o-b.o);
   buildChunks();
   drawLine();
@@ -378,7 +402,7 @@ let CH=[];
 function buildChunks(){
   const w=S.words.filter(x=>!x.off);CH=[];let cur=[];
   for(let i=0;i<w.length;i++){
-    if(cur.length&&(cur.length>=3||w[i].s-cur[cur.length-1].e>0.7)){CH.push(cur);cur=[]}
+    if(cur.length&&(cur.length>=3||w[i].s-cur[cur.length-1].e>0.6||/[.!?…,;:]$/.test(cur[cur.length-1].w))){CH.push(cur);cur=[]}
     cur.push(w[i]);
   }
   if(cur.length)CH.push(cur);
@@ -435,7 +459,7 @@ function step(){
     if(P.playing){
       const g2=R.segs[P.i];
       P.T=g2.o+clamp(src-g2.s,0,g2.e-g2.s);
-      for(const n of S.inserts){if(n.o>P.lastT&&n.o<=P.T+0.01&&n.sfx&&n.sfx!="none")sfx(n.sfx,n.sfx=="thud"?0.8:0.5)}
+      for(const n of S.inserts){if(n.o>P.lastT&&n.o<=P.T+0.01&&n.sfx&&(n.sfx=="pop"||n.sfx=="thud"))sfx(n.sfx,n.sfx=="thud"?0.35:0.22)}
       P.lastT=P.T+0.01;
     }
   }
@@ -614,7 +638,7 @@ async function moreIdeas(n){
   if(n.loading)return;n.loading=true;panel(0);
   try{
     const img=await frameAt(n.t);
-    const prompt=`Ты сильный моушн-дизайнер вертикальных рилсов. В этот момент ролика (${n.o.toFixed(1)} с) звучит: "${ctxAround(n.o)}". Кадр приложен. Название ролика: "${S.title}".
+    const prompt=`Ты сильный моушн-дизайнер вертикальных рилсов. В этот момент ролика (${n.o.toFixed(1)} с) звучит: "${ctxAround(n.o)}". Кадр приложен. Лицо в кадре (не закрывать): ${JSON.stringify(faceAt(n.t))}. Название ролика: "${S.title}".
 Сейчас здесь вставка: ${JSON.stringify(strip(n))}.
 Придумай 3 СОВСЕМ РАЗНЫХ новых варианта вставки на этот же момент: другая идея, другой смысл, другая композиция и анимация. Каждая по смыслу именно про то, что здесь говорят и видно, с юмором или пользой, не общие слова. Тексты по-русски, коротко. Не закрывай лицо.
 ${GFX_DOC}
@@ -639,6 +663,7 @@ async function run(cmd,real){
     const img=await frameAt(mapSrc(P.T).src);
     const prompt=`Ты сильный монтажёр и моушн-дизайнер вертикальных рилсов. Пользователь просит правку: "${cmd}".
 Текущий монтаж (время в секундах готового ролика, кадр в момент playhead приложен): ${JSON.stringify(plan)}
+Лицо в кадре сейчас (не закрывать, тексты ниже лица, над субтитрами): ${JSON.stringify(faceAt(mapSrc(P.T).src))}
 ${GFX_DOC}
 Стили субтитров: ${SUB_KEYS.join(", ")}.
 Пойми, чего человек хочет, и сделай это на уровне хорошего монтажёра, по смыслу ролика. Новые вставки придумывай уникальные, про то, что говорится и видно.
@@ -732,6 +757,7 @@ const PLAN_PROMPT=(D,frames)=>`Ты лучший монтажёр и моушн-
 Сначала пойми ролик: о чём он, кто говорит, где лицо и важные предметы в кадре, настроение, где смешно, где пик. Потом смонтируй.
 Верни ТОЛЬКО JSON:
 {"title":"о чём ролик, 2-4 слова","lang":"язык речи","palette":["#hex","#hex","#hex"],
+"faces":[{"t":сек кадра,"x":лево,"y":верх,"w":ширина,"h":высота}] (лицо главного человека на КАЖДОМ кадре, в координатах холста 1080x1920: кадры приложены уменьшенными в 4 раза, умножь на 4; от лба до подбородка),
 "words":[{"w":"слово","s":сек,"e":сек}],
 "keep":[{"s":сек,"e":сек}],
 "inserts":[вставка,...]}
@@ -741,7 +767,8 @@ inserts: одна вставка на каждые 2-4 секунды, не на
 - Каждая вставка придумана именно под этот момент ролика: что сказано и что видно. Никаких общих фраз, никаких шаблонов.
 - Разные идеи по ходу ролика: заголовок-крючок в первые 1.5 с, подписи и ярлыки к людям и предметам со стрелками, крупные выкрики, ироничные комментарии, эмодзи-реакции, счётчики и рейтинги, окно-лупа на деталь, ключевые слова цитатой, финальный панчлайн.
 - Единая палитра ролика (palette), у текстов обводка или плашка для читаемости.
-- Не закрывай лицо: смотри на кадры, ставь графику в свободные места. Субтитры внизу (y 1380-1500), туда не ставь.
+- Никогда не закрывай лицо и глаза. Основное место для текстов и плашек: нижняя половина кадра, y от 1000 до 1320 (над субтитрами), или свободный край рядом с предметом. Выше лица только если там пусто и это заголовок. Субтитры внизу (y 1380-1500), туда не ставь.
+- Анимации спокойные и чистые, как у профессиональных моушн-дизайнеров: pop, rise, fade, мягкий slam. Вспышка flash и тряска shake максимум 1-2 раза за ролик. sfx: pop или none.
 - Анимации и композиция меняются от вставки к вставке; удары (slam, stamp, shake, zoom, flash) только на пиках.
 - Тексты по-русски, короткие, живые.
 ${GFX_DOC}`;
@@ -765,6 +792,7 @@ function applyPlan(j){
   S.words=(j.words||[]).filter(w=>w&&w.w&&isFinite(w.s)).map(w=>({w:String(w.w),s:+w.s,e:isFinite(w.e)&&w.e>w.s?+w.e:+w.s+0.3})).sort((a,b)=>a.s-b.s);
   S.keep=(j.keep||[]).filter(k=>isFinite(k.s)&&isFinite(k.e)).map(k=>({s:+k.s,e:+k.e}));
   S.inserts=(j.inserts||[]).filter(n=>n&&isFinite(n.t)).map(n=>cleanIns(n));
+  S.faces=(j.faces||[]).filter(f=>f&&[f.t,f.x,f.y,f.w,f.h].every(isFinite)).map(f=>({t:+f.t,x:+f.x,y:+f.y,w:+f.w,h:+f.h}));
   S.cuts=[];S.title=j.title||"";
   rebuild();panel(0);seekOut(0);
 }
