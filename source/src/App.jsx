@@ -143,18 +143,18 @@ ${subs}
     const brief = makeBrief(st);
     let code = null, model = 'claude-opus-5-5';
     for (let round = 0; round < 3; round++) {
-      note(round == 0 ? 'Claude рисует графику в стиле «' + (stylesRef.current.find((x) => x.id == styleId)?.name || styleId) + '»…' : 'Claude исправляет замечания…', round);
+      note(round == 0 ? 'Claude рисует графику в стиле «' + (stylesRef.current.find((x) => x.id == styleId)?.name || styleId) + '»…' : 'DeepSeek исправляет замечания проверки…', round);
       const txt = await askClaudeChat({system: style.sys, messages: msgs, model, max_tokens: 20000}, (i) => note(null, round, i));
       const c = extractCode(txt);
       msgs.push({role: 'assistant', content: txt});
-      if (!c) { msgs.push({role: 'user', content: 'Ответ без кода. Пришли код целиком одним блоком ```js.'}); model = 'claude-sonnet-5-5'; continue; }
+      if (!c) { msgs.push({role: 'user', content: 'Ответ без кода. Пришли код целиком одним блоком ```js.'}); model = 'deepseek'; continue; }
       code = c;
       let fns, chk;
       try { fns = compile(style.lib, code); chk = selfCheck(makeK(brief), fns, st.dur); } catch (e) { chk = {error: String(e.message || e), issues: []}; }
       const problems = [chk.error, ...(chk.issues || [])].filter(Boolean);
       if (!problems.length || round == 2) break;
       msgs.push({role: 'user', content: 'Проверка кадров нашла замечания:\n- ' + problems.join('\n- ') + '\nИсправь и пришли код целиком.'});
-      model = 'claude-sonnet-5-5';
+      model = 'deepseek';
     }
     if (!code) throw new Error('Claude не прислал код графики');
     let soundUrl = null; try { soundUrl = makeSoundWav(compile(style.lib, code), makeK(brief), st.dur); } catch (e) {}
@@ -189,17 +189,21 @@ ${subs}
     let chk; try { chk = selfCheck(makeK(ov.brief), compile(ov.lib, ov.code), st.dur); } catch (e) { chk = {error: String(e.message || e), issues: []}; }
     const problems = [chk.error, ...(chk.issues || [])].filter(Boolean);
     if (!problems.length) return toast('✅ Проверка: лицо не закрыто, ничего не вылезает', true, 4000);
-    await editCode('Проверка кадров нашла замечания:\n- ' + problems.join('\n- ') + '\nИсправь.');
+    await editCode('Проверка кадров нашла замечания:\n- ' + problems.join('\n- ') + '\nИсправь.', 'fix');
   }
   // правка кода графики (Sonnet), с проверкой
-  async function editCode(ask) {
+  async function editCode(ask, kind) {
     const st = SRef.current, ov = st.overlay;
-    setBusy({t: 'Claude правит графику…', s: ask.slice(0, 80), p: 0.3});
+    // творческое — Opus, техническое (исправить, сдвинуть, поменять текст) — DeepSeek
+    const a = norm(ask);
+    const creative = kind != 'fix' && (/(придума|креатив|идею|иде[ия]|смешн|ярче|интересн|красив|стильн|эффектн|добавь|ещё|еще|переделай|по-другому|другой вариант)/.test(a) || !/(поменяй|замени|исправ|убери|удали|сдвин|подвин|выше|ниже|левее|правее|раньше|позже|больше|меньше|крупнее|мельче|цвет|текст|опечат|перенеси|короче|длиннее|быстрее|медленнее)/.test(a));
+    const model = creative ? 'claude-opus-5-5' : 'deepseek', who = creative ? 'Claude' : 'DeepSeek';
+    setBusy({t: who + ' правит графику…', s: ask.slice(0, 80), p: 0.3});
     try {
       const msgs = [{role: 'user', content: briefText(st, st.an)}, {role: 'assistant', content: '```js\n' + ov.code + '\n```'}, {role: 'user', content: 'Правка: ' + ask + '\nПришли исправленный код целиком одним блоком ```js.'}];
       let code = null;
       for (let round = 0; round < 2; round++) {
-        const txt = await askClaudeChat({system: ov.sys, messages: msgs, model: 'claude-sonnet-5-5', max_tokens: 20000}, (i) => setBusy({t: 'Claude правит графику…', s: ask.slice(0, 80) + ' · ' + i * 3 + ' с', p: Math.min(0.9, 0.3 + i * 0.01)}));
+        const txt = await askClaudeChat({system: ov.sys, messages: msgs, model: round == 0 ? model : 'deepseek', max_tokens: 20000}, (i) => setBusy({t: (round == 0 ? who : 'DeepSeek') + ' правит графику…', s: ask.slice(0, 80) + ' · ' + i * 3 + ' с', p: Math.min(0.9, 0.3 + i * 0.01)}));
         const c = extractCode(txt); if (!c) break; code = c; msgs.push({role: 'assistant', content: txt});
         let chk; try { chk = selfCheck(makeK(ov.brief), compile(ov.lib, code), st.dur); } catch (e) { chk = {error: String(e.message || e), issues: []}; }
         const problems = [chk.error, ...(chk.issues || [])].filter(Boolean);
