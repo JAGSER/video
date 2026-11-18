@@ -1,6 +1,6 @@
 import React, {useEffect, useMemo, useRef, useState, useCallback} from 'react';
-import {Player} from '@remotion/player';
 import {Montage, FPS} from './Montage.jsx';
+import DemoApp from './ui/DemoApp.jsx';
 import {askAI, b64, parseJSON, audioWav, grabFrames, ANALYZE_PROMPT, OVERLAY_PROMPT, styleRules, STYLE_PICK, askClaudeChat, extractCode} from './ai.js';
 import {makeK, compile, selfCheck, makeSoundWav} from './overlay.js';
 
@@ -280,72 +280,22 @@ ${subs}
   const nearest = () => { let b = null, bd = 1e9; for (const n of R.inserts) { const d = Math.abs(n.o - T); if (d < bd) { bd = d; b = n; } } return b; };
   const selectIns = (id) => { setSelId(id); setMode('ins'); const n = R.inserts.find((x) => x.id == id); if (n) previewIns(n); };
 
-  // ===== панель =====
-  function Panel() {
-    if (!S.src) return <div className="hint" style={{fontSize: 14}}>Нажми «＋ Своё видео» вверху. ИИ посмотрит ролик и смонтирует его со своими вставками.</div>;
-    if (mode == 'mont') return <>
-      <div className="row" style={{flexWrap: 'nowrap', overflowX: 'auto'}}><Tog on={S.removePauses} label="Паузы" onClick={() => update((s) => { s.removePauses = !s.removePauses; })}/><Tog on={S.jumpZoom} label="Зум" onClick={() => update((s) => { s.jumpZoom = !s.jumpZoom; })}/><button className="btn" style={{whiteSpace: 'nowrap'}} onClick={() => S.file && analyze(S.file, S.src, S.dur, S.styleId)}>✨ Заново</button><button className="btn" style={{whiteSpace: 'nowrap'}} onClick={() => checkDesign()}>🎨 Проверить</button><button className="btn" onClick={undo}>↩</button></div>
-    </>;
-    if (mode == 'sub') {
-      const list = only && likedSub.length ? SUB_KEYS.filter((k) => likedSub.includes(k)) : SUB_KEYS;
-      const i = Math.max(0, list.indexOf(S.subStyle)), k = list[i], t = SUBS[k];
-      const go = (d) => update((s) => { s.subStyle = list[(i + d + list.length) % list.length]; }, false);
-      return <>
-        <div className="vhead"><span>ВАРИАНТ {i + 1} ИЗ {list.length}</span><span style={{display: 'flex', gap: 4}}><button className={'btn like' + (likedSub.includes(k) ? ' on' : '')} style={{padding: '3px 8px', fontSize: 11}} onClick={() => { const a = likedSub.includes(k) ? likedSub.filter((x) => x != k) : [...likedSub, k]; setLikedSub(a); LS.set('mnt_liked_sub', a); }}>♥</button><button className="btn" style={{padding: '3px 8px', fontSize: 11}} onClick={() => setOnly(!only)}>{only ? 'Все' : 'Мои: ' + likedSub.length}</button></span></div>
-        <Swipe go={go}><div className="nm" key={k}><span className="e">{t.e}</span>{t.n}</div></Swipe>
-        <div className="dots">{list.map((x, j) => <i key={x} className={(j == i ? 'on ' : '') + (likedSub.includes(x) ? 'lk' : '')}></i>)}</div>
-      </>;
-    }
-    if (mode == 'ins') {
-      if (!styles.length) return <div className="hint">Загружаю стили…</div>;
-      const cur = Math.max(0, styles.findIndex((x) => x.id == (pickStyle || S.styleId)));
-      const st = styles[cur];
-      const go = (d) => setPickStyle(styles[(cur + d + styles.length) % styles.length].id);
-      return <>
-        <div className="vhead"><span>СТИЛЬ {cur + 1} ИЗ {styles.length}{st.id == S.styleId ? ' · СЕЙЧАС' : ''}</span></div>
-        <Swipe go={go}><div className="nm" key={st.id} style={{fontSize: 14, padding: '0 38px', textAlign: 'center', flexDirection: 'column', gap: 0}}><b>{st.name}</b><span style={{fontSize: 10, fontWeight: 500, color: '#999', lineHeight: 1.2}}>{String(st.desc || '').split(':')[0].slice(0, 70)}</span></div></Swipe>
-        <div className="row" style={{marginTop: 4}}><button className="btn lime" style={{flex: 1}} disabled={st.id == S.styleId && !!S.overlay} onClick={() => S.file && analyze(S.file, S.src, S.dur, st.id)}>🎨 Сделать в этом стиле</button></div>
-      </>;
-    }
-    if (mode == 'exp') return <>
-      <div className="row"><Tog on={q == 1080} label="1080p" onClick={() => { const v = q == 1080 ? 720 : 1080; setQ(v); LS.set('mnt_q', v); }}/><button className="btn lime" style={{flex: 1}} onClick={exportMp4}>⬇ Скачать MP4 ({fmt(R.outDur)})</button></div>
-    </>;
-    return null;
-  }
-
-  useEffect(() => { window.__app = {S, R, run, seek, exportMp4}; });
+  useEffect(() => { window.__app = {S, R, run, seek, exportMp4, inject: (o) => update((s) => Object.assign(s, o), false)}; });
+  // фразы речи для расшифровки: новая фраза после паузы больше 0,6 с или после . ! ? …; вырезанные слова помечены
+  const phrases = useMemo(() => {
+    const out = []; let cur = null;
+    S.words.forEach((w, i) => {
+      const prev = S.words[i - 1];
+      if (!cur || w.s - prev.e > 0.6 || /[.!?…]$/.test(prev.w)) { cur = []; out.push(cur); }
+      const m = w.s + Math.min(0.05, (w.e - w.s) / 2);
+      const kept = R.segs.some((g) => m >= g.s && m < g.e);
+      cur.push({...w, os: R.mapOut ? R.mapOut(w.s) : w.s, oe: R.mapOut ? R.mapOut(w.e) : w.e, cut: !kept});
+    });
+    out.forEach((p) => { p.s = p[0].os; p.e = p[p.length - 1].oe; p.cut = p.every((w) => w.cut); });
+    return out;
+  }, [S.words, R]);
   const durF = Math.max(1, Math.round(R.outDur * FPS));
-  return <div id="app">
-    <header><h1>VIDEO<b>.</b></h1><button className="btn lime" onClick={() => fileRef.current.click()}>＋ Своё видео</button><input ref={fileRef} type="file" accept="video/*" style={{position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none'}} onChange={onFile}/></header>
-    <div id="stage">
-      <div id="playerBox">
-        {S.src ? <Player ref={player} component={Montage} inputProps={{src: S.src, segs: R.segs, inserts: R.inserts, chunks: R.chunks, subStyle: S.subStyle, jumpZoom: S.jumpZoom, outDur: R.outDur, theme: S.theme, overlay: S.overlay, soundUrl: S.soundUrl}}
-          durationInFrames={durF} fps={FPS} compositionWidth={1080} compositionHeight={1920} style={{width: '100%', height: '100%'}} clickToPlay controls={false} acknowledgeRemotionLicense/>
-          : <div className="empty"><b>Загрузи видео</b>кнопкой «＋ Своё видео» вверху</div>}
-        {S.src ? <div style={{position: 'absolute', inset: 0}} onClick={() => { const p = player.current; if (p) p.toggle(); }}/> : null}
-      </div>
-      {busy ? <div id="busy" className="on"><div className="t">{busy.t}</div><div className="scan det"><i style={{width: (busy.p || 0) * 100 + '%'}}></i></div><div className="s">{busy.s}</div></div> : null}
-    </div>
-    <div id="lineWrap">
-      <div id="line" ref={lineRef} onPointerDown={onLineDown}>{R.pieces.map((p, i) => <div key={i + ':' + p.s} className={'pc ' + (p.keep ? 'k' : 'x') + (p.gap ? ' g' : '')} style={{flexGrow: p.keep ? p.e - p.s : 0.0001}}></div>)}</div>
-      <div id="chips">{R.inserts.map((n) => <div key={n.id} className={'ch' + (n.id == selId ? ' sel' : '')} style={{left: (100 * n.o / (R.outDur || 1)) + '%'}} onClick={(e) => { e.stopPropagation(); selectIns(n.id); }}>{n.icon}</div>)}</div>
-      <div id="ph" style={{left: 8 + (lineRef.current ? lineRef.current.clientWidth : 0) * clamp(T / (R.outDur || 1)) + 'px'}}></div>
-      <div id="tinfo"><span>{fmt(T)}</span><span>{fmt(R.outDur)}{R.outDur < S.dur - 0.05 ? '  (было ' + fmt(S.dur) + ')' : ''}</span></div>
-    </div>
-    <div id="modes">{[['mont', '✂ Монтаж'], ['ins', '🎨 Стиль'], ['sub', '💬 Субтитры'], ['exp', '⬇ MP4']].map(([m, l]) => <button key={m} className={'md' + (mode == m ? ' on' : '')} onClick={() => setMode(m)}>{l}</button>)}</div>
-    <div id="panel">{Panel()}</div>
-    <div id="voice">
-      <input id="cmd" placeholder="Скажи или напиши правку…" enterKeyHint="send" autoComplete="off" value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => { if (e.key == 'Enter') run(cmd); }}/>
-      <button id="mic" className={rec ? 'on' : ''} onClick={mic}>🎤</button>
-      <button id="send" onClick={() => run(cmd)}>➜</button>
-    </div>
-    <div id="toast" className={(toastS.on ? 'on' : '') + (toastS.ai ? ' ai' : '')}>{toastS.t}</div>
-  </div>;
-}
-function Tog({on, label, onClick}) { return <div className={'tog' + (on ? ' on' : '')} onClick={onClick}><i></i>{label}</div>; }
-function Swipe({go, children}) {
-  const x0 = useRef(null);
-  return <div className="car" onTouchStart={(e) => { x0.current = e.touches[0].clientX; }} onTouchEnd={(e) => { if (x0.current == null) return; const dx = e.changedTouches[0].clientX - x0.current; if (Math.abs(dx) > 40) go(dx < 0 ? 1 : -1); x0.current = null; }}>
-    <button className="ar l" onClick={() => go(-1)}>‹</button>{children}<button className="ar r" onClick={() => go(1)}>›</button>
-  </div>;
+  const inputProps = {src: S.src, segs: R.segs, inserts: R.inserts, chunks: R.chunks, subStyle: S.subStyle, jumpZoom: S.jumpZoom, outDur: R.outDur, theme: S.theme, overlay: S.overlay, soundUrl: S.soundUrl};
+  const ctx = {S, R, T, mode, setMode, busy, toastS, cmd, setCmd, rec, likedSub, setLikedSub, only, setOnly, q, setQ, styles, pickStyle, setPickStyle, selId, player, fileRef, lineRef, onFile, analyze, checkDesign, undo, update, seek, exportMp4, mic, run, onLineDown, selectIns, inputProps, phrases, durF, FPS, SUBS, SUB_KEYS, fmt, LS};
+  return <DemoApp ctx={ctx}/>;
 }

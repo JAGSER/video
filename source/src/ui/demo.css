@@ -1,0 +1,113 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&family=Unbounded:wght@600;800&display=swap');
+/* Анимации и классы перенесены из демо «Просмотр: 10 функций» ДОСЛОВНО */
+
+body{margin:0}
+.chips{scrollbar-width:none}.chips::-webkit-scrollbar{display:none}
+@keyframes enter{from{opacity:0;transform:translateX(var(--ed,40px))}to{opacity:1;transform:translateX(0)}}
+.enter{animation:enter .28s cubic-bezier(.2,.8,.2,1) both}
+@keyframes type{0%,4%{clip-path:inset(0 100% 0 0)}14%,100%{clip-path:inset(0 0 0 0)}}
+@keyframes wave{0%,100%{transform:scaleY(.25)}50%{transform:scaleY(1)}}
+@keyframes ring{0%{transform:scale(1);opacity:.6}100%{transform:scale(1.8);opacity:0}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+@keyframes bar{0%,14%{transform:scaleX(0)}36%,100%{transform:scaleX(1)}}
+@keyframes spdk{0%,36%{transform:scale(.4);opacity:0}42%,100%{transform:scale(1);opacity:1}}
+@keyframes ph{from{transform:translateX(0)}to{transform:translateX(342px)}}
+@keyframes sh{0%,18%{transform:translate(0,0)}38%,92%{transform:translate(var(--x,0px),var(--y,0px))}100%{transform:translate(0,0)}}
+@keyframes hop{0%,16%{transform:translate(0,0) scale(1);box-shadow:none}27%{transform:translate(var(--ax,0px),var(--ay,0px)) scale(1.08);box-shadow:0 0 0 2px #C6FF3D,0 10px 30px rgba(198,255,61,.45)}38%{transform:translate(var(--x,0px),var(--y,0px)) scale(1);box-shadow:0 0 0 2px #C6FF3D}48%,92%{transform:translate(var(--x,0px),var(--y,0px));box-shadow:none}100%{transform:translate(0,0)}}
+@keyframes out{0%,16%{transform:translate(0,0) rotate(0);opacity:1;box-shadow:none}22%{transform:translate(-8px,0);box-shadow:0 0 0 2px #FF5A5A;color:#FF8A8A}36%,92%{transform:translate(400px,-12px) rotate(9deg);opacity:0}100%{transform:translate(0,0);opacity:1;box-shadow:none}}
+@keyframes col{0%,18%{width:var(--w)}23%{width:var(--w);background:#FF5A5A}38%,92%{width:0;margin-left:-4px;background:#FF5A5A}100%{width:var(--w)}}
+@keyframes lit{0%,20%{box-shadow:none}28%,92%{box-shadow:inset 0 0 0 3px #C6FF3D}100%{box-shadow:none}}
+@keyframes pop{0%,30%{transform:scale(0);opacity:0}38%{transform:scale(1.15);opacity:1}44%,92%{transform:scale(1);opacity:1}100%{transform:scale(1);opacity:0}}
+@keyframes fly{0%,18%{transform:translate(0,0) scale(1);opacity:0}21%{transform:translate(0,-6px) scale(1.06);opacity:1}36%{transform:translate(var(--x),var(--y)) scale(var(--s,.4));opacity:1}40%,100%{transform:translate(var(--x),var(--y)) scale(var(--s,.4));opacity:0}}
+@keyframes tint{0%,16%{background:var(--b,#23232C)}22%,92%{background:var(--c)}100%{background:var(--b,#23232C)}}
+@keyframes scan{0%,8%{transform:translateX(0);opacity:0}10%{opacity:1}32%{transform:translateX(342px);opacity:1}34%,100%{transform:translateX(342px);opacity:0}}
+@keyframes mark{0%,10%{transform:scaleY(0);opacity:0;background:#C6FF3D}14%{transform:scaleY(1.4);opacity:1;background:#C6FF3D;box-shadow:0 0 14px 3px rgba(198,255,61,.7)}22%,92%{transform:scaleY(1);opacity:1;background:#0B0B0F;box-shadow:none}100%{opacity:0}}
+@keyframes from{0%,30%{transform:translate(var(--fx),var(--fy)) scale(.35);opacity:0}32%{opacity:1}46%,92%{transform:translate(0,0) scale(1);opacity:1}100%{opacity:0}}
+@keyframes cut{0%,16%{max-height:30px;opacity:1;transform:translateX(0);background:#23232C;color:#F4F4F6;text-decoration-color:transparent;margin-bottom:6px;padding-top:7px;padding-bottom:7px}21%{background:rgba(255,90,90,.2);color:#FF8A8A;text-decoration-color:#FF5A5A}28%{transform:translateX(-30px);opacity:.8;max-height:30px;margin-bottom:6px}38%,92%{max-height:0;opacity:0;transform:translateX(-120px);margin-bottom:0;padding-top:0;padding-bottom:0}100%{max-height:30px;opacity:1;transform:translateX(0);margin-bottom:6px}}
+@keyframes roll{0%,16%{transform:translateY(0)}22%{transform:translateY(-48px)}28%{transform:translateY(-96px)}34%{transform:translateY(-144px)}40%,92%{transform:translateY(-192px)}100%{transform:translateY(0)}}
+@keyframes hit{0%,38%{color:#F4F4F6;transform:scale(1)}42%{color:#C6FF3D;transform:scale(1.15)}48%,92%{color:#C6FF3D;transform:scale(1)}100%{color:#F4F4F6}}
+@keyframes glowc{0%,16%{box-shadow:none}22%,92%{box-shadow:0 0 0 3px #C6FF3D,0 0 22px rgba(198,255,61,.45)}100%{box-shadow:none}}
+@keyframes tick{0%,16%{background:transparent;transform:scale(1)}20%{background:#C6FF3D;transform:scale(1.35)}24%,92%{background:#C6FF3D;transform:scale(1)}100%{background:transparent}}
+@keyframes on{0%,16%{opacity:0}20%,92%{opacity:1}100%{opacity:0}}
+@keyframes fill{0%,36%{transform:scaleX(0)}56%,92%{transform:scaleX(1)}100%{transform:scaleX(0)}}
+@keyframes swapA{0%,56%{opacity:1}60%,100%{opacity:0}}
+@keyframes swapB{0%,56%{opacity:0}60%,92%{opacity:1}100%{opacity:0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes bob{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
+@keyframes wipe{0%{transform:translateX(-110%)}60%,100%{transform:translateX(110%)}}
+@keyframes twinkle{0%,100%{opacity:.2;transform:scale(.6)}50%{opacity:1;transform:scale(1)}}
+@keyframes vis{0%,19.5%{opacity:1}20%,100%{opacity:0}}
+@keyframes sel{0%,18%{transform:translateY(0)}20%,38%{transform:translateY(46px)}40%,58%{transform:translateY(92px)}60%,78%{transform:translateY(138px)}80%,100%{transform:translateY(184px)}}
+@keyframes kara{0%,2%{clip-path:inset(0 100% 0 0)}16%,100%{clip-path:inset(0 0 0 0)}}
+@keyframes bnc{0%{transform:scale(0)}5%{transform:scale(1.35)}9%,100%{transform:scale(1)}}
+@keyframes neon{0%,100%{opacity:1}2%{opacity:.3}4%{opacity:1}7%{opacity:.4}9%{opacity:1}}
+@keyframes wv2{0%,100%{transform:translateY(0)}4%{transform:translateY(-12px)}9%{transform:translateY(0)}}
+@keyframes zp{0%,38%{transform:scale(1)}42%{transform:scale(1.3)}47%,100%{transform:scale(1)}}
+@keyframes wipeIn{0%,48%{clip-path:inset(0 100% 0 0)}58%,92%{clip-path:inset(0 0 0 0)}100%{clip-path:inset(0 100% 0 0)}}
+@keyframes gl{0%,64%{transform:translateX(0);opacity:0}66%{transform:translateX(-16px);opacity:1}68%{transform:translateX(12px)}70%{transform:translateX(-8px)}73%,100%{transform:translateX(0);opacity:0}}
+@keyframes jump{0%,8%{transform:translate(177px,62px)}11%{transform:translate(0,124px)}14%{transform:translate(177px,0)}17%{transform:translate(0,62px)}20%{transform:translate(177px,124px)}24%{transform:translate(177px,0)}28%,92%{transform:translate(0,0)}100%{transform:translate(177px,62px)}}
+@keyframes chop{0%,30%{transform:scaleY(0);opacity:0}33%{transform:scaleY(1.3);opacity:1}36%,92%{transform:scaleY(1);opacity:1}100%{opacity:0}}
+@keyframes fade{0%,28%{opacity:1}32%,92%{opacity:0}100%{opacity:1}}
+@keyframes punch{0%{transform:scale(1)}30%{transform:scale(1.18)}100%{transform:scale(1)}}
+@keyframes flash{0%,80%{opacity:0}86%{opacity:.55}100%{opacity:0}}
+.cmd{animation:type 4s steps(24) infinite}
+.wv{animation:wave .5s ease-in-out infinite}
+.ring{animation:ring 1s ease-out infinite}
+.ph{animation:ph 4s linear infinite}
+.sh{animation:sh 4s cubic-bezier(.6,0,.2,1) infinite}
+.hop{animation:hop 4s cubic-bezier(.6,0,.2,1) infinite}
+.out{animation:out 4s cubic-bezier(.6,0,.3,1) infinite}
+.col{animation:col 4s cubic-bezier(.6,0,.2,1) infinite;flex:none}
+.lit{animation:lit 4s infinite;flex:none}
+.pop{animation:pop 4s cubic-bezier(.3,1.6,.5,1) infinite}
+.fly{animation:fly 4s cubic-bezier(.5,0,.3,1) infinite}
+.tint{animation:tint 4s infinite}
+.scan{animation:scan 4s linear infinite}
+.mark{animation:mark 4s ease-out infinite}
+.from{animation:from 4s cubic-bezier(.3,1.3,.5,1) infinite}
+.cut{animation:cut 4s cubic-bezier(.6,0,.3,1) infinite;overflow:hidden;text-decoration:line-through;text-decoration-thickness:2px;box-sizing:border-box}
+.roll{animation:roll 4s cubic-bezier(.5,0,.3,1) infinite}
+.hit{animation:hit 4s cubic-bezier(.3,1.6,.5,1) infinite;display:inline-block}
+.glowc{animation:glowc 4s infinite}
+.tick{animation:tick 4s cubic-bezier(.3,1.6,.5,1) infinite}
+.on{animation:on 4s infinite}
+.fill{animation:fill 4s cubic-bezier(.4,0,.2,1) infinite;transform-origin:left}
+.swapA{animation:swapA 4s infinite}
+.swapB{animation:swapB 4s infinite}
+.spin{animation:spin 1.2s linear infinite}
+.bob{animation:bob .6s ease-in-out infinite;transform-origin:bottom}
+.wipe{animation:wipe 1.4s ease-in-out infinite}
+.twinkle{animation:twinkle 1s ease-in-out infinite}
+.vis{animation:vis 4s infinite}
+.sel{animation:sel 4s cubic-bezier(.5,0,.2,1) infinite}
+.kara{animation:kara 4s linear infinite}
+.bnc{animation:bnc 4s cubic-bezier(.3,1.6,.5,1) infinite;display:inline-block}
+.typw{animation:kara 4s steps(14) infinite}
+.neon{animation:neon 4s infinite}
+.wv2{animation:wv2 4s ease-in-out infinite;display:inline-block}
+.zp{animation:zp 4s ease-out infinite}
+.wipeIn{animation:wipeIn 4s cubic-bezier(.6,0,.2,1) infinite}
+.gl{animation:gl 4s steps(1) infinite}
+.jump{animation:jump 4s cubic-bezier(.5,0,.3,1) infinite}
+.chop{animation:chop 4s ease-out infinite;transform-origin:bottom}
+.fade{animation:fade 4s infinite}
+.punch{animation:punch .3s ease-out infinite}
+.flash{animation:flash .3s infinite}
+.pv{position:absolute;left:0;top:0;width:342px;height:190px;border-radius:20px;overflow:hidden;background:#1A1F2E}
+.hd{position:absolute;left:50%;top:34px;width:84px;height:84px;margin-left:-42px;border-radius:50%;background:#8B6CFF}
+.bd{position:absolute;left:50%;top:110px;width:150px;height:100px;margin-left:-75px;border-radius:75px 75px 0 0;background:#8B6CFF}
+.pbar{position:absolute;left:0;right:0;top:0;height:4px;background:rgba(255,255,255,.08)}
+.pbar>div{height:4px;background:#C6FF3D;animation:bar 4s cubic-bezier(.2,.8,.2,1) infinite;transform-origin:left}
+.ai{position:absolute;left:12px;top:14px;padding:6px 10px;border-radius:999px;background:rgba(11,11,15,.75);font-size:11px;font-weight:700;display:flex;gap:6px;align-items:center}
+.dot{width:6px;height:6px;border-radius:50%;background:#C6FF3D;animation:blink .6s infinite}
+.spd{position:absolute;right:12px;top:14px;padding:6px 10px;border-radius:999px;background:#C6FF3D;color:#0B0B0F;font-size:11px;font-weight:800;animation:spdk 4s cubic-bezier(.3,1.6,.5,1) infinite}
+.card{position:absolute;left:0;right:0;border-radius:16px;background:#17171D}
+.lbl{position:absolute;font-size:10px;font-weight:700;letter-spacing:.1em;color:#A1A1AA}
+.row{position:absolute;left:14px;right:14px;border-radius:8px;background:#23232C;display:flex;align-items:center;gap:8px;padding:0 10px;font-size:13px;box-sizing:border-box}
+.tk{width:4px;height:16px;border-radius:2px;flex:none}
+.seg{position:absolute;top:504px;height:52px;border-radius:8px}
+.tile{position:absolute;border-radius:14px;background:#17171D;overflow:hidden}
+.tname{position:absolute;left:12px;bottom:10px;font-size:12px;font-weight:700}
+.scard{position:absolute;width:104px;height:62px;border-radius:10px;color:#0B0B0F;display:flex;flex-direction:column;justify-content:flex-end;padding:8px;box-sizing:border-box}
+.scard b{font-size:12px}.scard span{font-size:10px;font-weight:500}
+.cap{font-family:Unbounded,sans-serif;font-weight:800;font-size:18px;color:#FFFFFF;text-shadow:0 2px 0 #0B0B0F}
