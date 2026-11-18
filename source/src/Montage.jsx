@@ -171,7 +171,7 @@ function getOverlay(ov) {
   if (!ov || !ov.code) return null;
   const key = ov.code.length + ':' + ov.code.slice(-200) + ':' + (ov.lib || '').length;
   let c = compiled.get(key);
-  if (!c) { try { c = {fns: compile(ov.lib, ov.code), rt: makeK(ov.brief)}; c.rt.setLayout(c.fns.layout); } catch (e) { c = {err: String(e && e.message || e)}; } compiled.set(key, c); }
+  if (!c) { try { c = {fns: compile(ov.lib, ov.code), rt: makeK(ov.brief)}; } catch (e) { c = {err: String(e && e.message || e)}; } compiled.set(key, c); }
   return c;
 }
 function Overlay({ov, srcT}) {
@@ -184,24 +184,13 @@ function Overlay({ov, srcT}) {
 
 // ===== субтитры =====
 const SUB_FONT = {fontFamily: FONTS.b, fontWeight: 900};
-function Subs({chunks, style, theme = {}, split = 0}) {
+function Subs({chunks, style, theme = {}}) {
   const AC = theme.accent || '#FFD43B', TX = theme.subText || '#fff', ST = theme.subStroke || '#000';
   const f = useCurrentFrame(), {fps} = useVideoConfig(), T = f / fps;
   if (style == 'off') return null;
   const c = chunks.find((c) => T >= c.s && T < c.e); if (!c) return null;
   let idx = -1; c.forEach((w, i) => { if (T >= w.os) idx = i; });
-  // отступы между словами полями, а не gap: при сборке MP4 gap теряется и слова слипаются
-  const sp = (ch, m) => Array.isArray(ch) ? ch.map((c, i) => <span key={i} style={{display: 'inline-block', margin: `0 ${m}px`}}>{c}</span>) : ch;
-  const wrap = (children, extra = {}) => <div style={{position: 'absolute', left: 40, right: 40, top: 1380, display: 'flex', justifyContent: 'center', flexWrap: 'wrap', ...extra}}>{sp(children, 11)}</div>;
-  if (style == 'steps') {
-    // как в пошаговых рилсах: белые слова без обводки; в режиме панели внизу панели, иначе по центру груди
-    const y = interpolate(split, [0, 1], [1170, 815]);
-    const vis = c.filter((w) => T >= w.os - 0.02);
-    const k = clamp((T - c.s) / 0.12);
-    return <div style={{position: 'absolute', left: 60, right: 60, top: y, display: 'flex', justifyContent: 'center', flexWrap: 'wrap', opacity: k, transform: `translateY(${(1 - k) * 10}px)`}}>
-      {c.map((w, i) => <span key={i} style={{display: 'inline-block', margin: '0 8px', fontFamily: FONTS.m, fontWeight: 700, fontSize: 58, letterSpacing: -0.5, color: '#fff', opacity: vis.includes(w) ? 1 : 0.55, textShadow: split > 0.5 ? 'none' : '0 3px 14px rgba(0,0,0,.65), 0 1px 3px rgba(0,0,0,.6)'}}>{w.w}</span>)}
-    </div>;
-  }
+  const wrap = (children, extra = {}) => <div style={{position: 'absolute', left: 40, right: 40, top: 1380, display: 'flex', justifyContent: 'center', flexWrap: 'wrap', gap: '0 22px', ...extra}}>{children}</div>;
   if (style == 'pop') { const w = c[Math.max(0, idx)]; const s = spring({frame: Math.round((T - w.os) * fps), fps, config: {damping: 10, stiffness: 220}}); return wrap(<div style={{...SUB_FONT, fontSize: 110, color: idx % 2 ? TX : AC, textShadow: outline(ST, 7), transform: `scale(${0.5 + 0.5 * s}) rotate(${idx % 2 ? 3 : -3}deg)`}}>{w.w.toUpperCase()}</div>); }
   if (style == 'type') { const vis = c.filter((w) => T >= w.os); return wrap(<div style={{fontFamily: FONTS.m, fontWeight: 700, fontSize: 58, color: '#fff', background: 'rgba(0,0,0,.82)', padding: '10px 26px', borderRadius: 18}}>{vis.map((w) => w.w).join(' ')}</div>); }
   return wrap(c.map((w, i) => {
@@ -230,18 +219,14 @@ export const Montage = ({src, segs = [], inserts = [], chunks = [], subStyle = '
   let segIdx = 0; segs.forEach((g, i) => { if (T >= g.o) segIdx = i; });
   const cam = camAt(T, segIdx, inserts, jumpZoom);
   const g0 = segs[segIdx]; const srcT = g0 ? g0.s + Math.max(0, Math.min(T - g0.o, g0.e - g0.s)) : T;
-  const oc = getOverlay(overlay);
-  const split = oc && oc.rt ? oc.rt.split(srcT) : 0, ty = oc && oc.rt ? oc.rt.ty * split : 0;
   return <AbsoluteFill style={{background: '#000', overflow: 'hidden'}}>
-    <AbsoluteFill style={{clipPath: split > 0.001 ? `inset(${(960 * split).toFixed(1)}px 0 0 0)` : undefined}}>
-      <AbsoluteFill style={{transform: `translate(${cam.x}px,${cam.y + ty}px) scale(${cam.z})`, transformOrigin: `540px ${800 - ty * 0}px`}}>
-        {src ? segs.map((g, i) => <Sequence key={i + ':' + g.s} from={Math.round(g.o * fps)} durationInFrames={Math.max(1, Math.round((g.e - g.s) * fps))} premountFor={15}>
-          <Video src={src} trimBefore={Math.round(g.s * fps)} objectFit="cover" style={{width: '100%', height: '100%'}}/>
-        </Sequence>) : null}
-      </AbsoluteFill>
+    <AbsoluteFill style={{transform: `translate(${cam.x}px,${cam.y}px) scale(${cam.z})`, transformOrigin: '540px 800px'}}>
+      {src ? segs.map((g, i) => <Sequence key={i + ':' + g.s} from={Math.round(g.o * fps)} durationInFrames={Math.max(1, Math.round((g.e - g.s) * fps))} premountFor={15}>
+        <Video src={src} trimBefore={Math.round(g.s * fps)} objectFit="cover" style={{width: '100%', height: '100%'}}/>
+      </Sequence>) : null}
     </AbsoluteFill>
     <Overlay ov={overlay} srcT={srcT}/>
-    <Subs chunks={chunks} style={subStyle} theme={theme} split={split}/>
+    <Subs chunks={chunks} style={subStyle} theme={theme}/>
     {inserts.map((n) => <Sequence key={n.id} from={Math.round(n.o * fps)} durationInFrames={Math.max(1, Math.round(n.d * fps))} layout="none">
       <Insert n={n} src={src}/>
       {n.sfx == 'pop' || n.sfx == 'thud' ? <Audio src={n.sfx == 'pop' ? 'a/pop.wav' : 'a/thud.wav'} volume={n.sfx == 'thud' ? 0.35 : 0.22}/> : null}
