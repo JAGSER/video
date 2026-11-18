@@ -285,19 +285,15 @@ ${GFX_DOC}
   function Panel() {
     if (!S.src) return <div className="hint" style={{fontSize: 14}}>Нажми «＋ Своё видео» вверху. ИИ посмотрит ролик и смонтирует его со своими вставками.</div>;
     if (mode == 'mont') return <>
-      <div className="row"><Tog on={S.removePauses} label="Вырезать паузы" onClick={() => update((s) => { s.removePauses = !s.removePauses; })}/><Tog on={S.jumpZoom} label="Зум-скачки" onClick={() => update((s) => { s.jumpZoom = !s.jumpZoom; })}/></div>
-      <div className="row" style={{marginTop: 8}}><button className="btn" style={{flex: 1}} onClick={() => S.file && analyze(S.file, S.src, S.dur)}>✨ Смонтировать заново</button><button className="btn" onClick={undo}>↩ Отменить</button></div>
-      <div className="row" style={{marginTop: 8}}><button className="btn" style={{flex: 1}} onClick={() => checkDesign(false)}>🎨 Claude, проверь и поправь дизайн</button></div>
-      <div className="hint">{S.title ? '«' + S.title + '» · ' : ''}вставок {R.inserts.length}{S.dur - R.outDur > 0.05 ? ' · вырезано ' + (S.dur - R.outDur).toFixed(1) + ' с' : ''}</div>
+      <div className="row" style={{flexWrap: 'nowrap', overflowX: 'auto'}}><Tog on={S.removePauses} label="Паузы" onClick={() => update((s) => { s.removePauses = !s.removePauses; })}/><Tog on={S.jumpZoom} label="Зум" onClick={() => update((s) => { s.jumpZoom = !s.jumpZoom; })}/><button className="btn" style={{whiteSpace: 'nowrap'}} onClick={() => S.file && analyze(S.file, S.src, S.dur)}>✨ Заново</button><button className="btn" style={{whiteSpace: 'nowrap'}} onClick={() => checkDesign(false)}>🎨 Проверить</button><button className="btn" onClick={undo}>↩</button></div>
     </>;
     if (mode == 'sub') {
       const list = only && likedSub.length ? SUB_KEYS.filter((k) => likedSub.includes(k)) : SUB_KEYS;
       const i = Math.max(0, list.indexOf(S.subStyle)), k = list[i], t = SUBS[k];
       const go = (d) => update((s) => { s.subStyle = list[(i + d + list.length) % list.length]; }, false);
       return <>
-        <div className="vhead"><span>ВАРИАНТ {i + 1} ИЗ {list.length}</span><button className="btn" style={{padding: '5px 10px', fontSize: 11}} onClick={() => setOnly(!only)}>{only ? 'Все' : 'Мои: ' + likedSub.length}</button></div>
+        <div className="vhead"><span>ВАРИАНТ {i + 1} ИЗ {list.length}</span><span style={{display: 'flex', gap: 4}}><button className={'btn like' + (likedSub.includes(k) ? ' on' : '')} style={{padding: '3px 8px', fontSize: 11}} onClick={() => { const a = likedSub.includes(k) ? likedSub.filter((x) => x != k) : [...likedSub, k]; setLikedSub(a); LS.set('mnt_liked_sub', a); }}>♥</button><button className="btn" style={{padding: '3px 8px', fontSize: 11}} onClick={() => setOnly(!only)}>{only ? 'Все' : 'Мои: ' + likedSub.length}</button></span></div>
         <Swipe go={go}><div className="nm" key={k}><span className="e">{t.e}</span>{t.n}</div></Swipe>
-        <div className="row" style={{marginTop: 8, justifyContent: 'center'}}><button className={'btn like' + (likedSub.includes(k) ? ' on' : '')} onClick={() => { const a = likedSub.includes(k) ? likedSub.filter((x) => x != k) : [...likedSub, k]; setLikedSub(a); LS.set('mnt_liked_sub', a); }}>♥ Нравится</button></div>
         <div className="dots">{list.map((x, j) => <i key={x} className={(j == i ? 'on ' : '') + (likedSub.includes(x) ? 'lk' : '')}></i>)}</div>
       </>;
     }
@@ -311,10 +307,9 @@ ${GFX_DOC}
       return <>
         <div className="vhead"><span>ВСТАВКА {k + 1}/{R.inserts.length} · ВАРИАНТ {V.i + 1} ИЗ {V.list.length}{V.loading ? ' · ИИ придумывает…' : ''}</span></div>
         <Swipe go={go}><div className="nm" key={n.id + ':' + V.i} style={{fontSize: 16, padding: '0 44px', textAlign: 'center'}}><span className="e">{n.icon}</span>{n.idea || 'вставка'}</div></Swipe>
-        <div className="row" style={{marginTop: 8}}>{texts.map((j) => <input key={n.id + ':' + j} className="fld" style={{flex: 1}} defaultValue={String(n.layers[j].text || '').replace(/\n/g, ' / ')} onChange={(e) => { const val = e.target.value.replace(/\s*\/\s*/g, '\n'); update((s) => { s.inserts = s.inserts.map((x) => x.id == n.id ? {...x, layers: x.layers.map((L, li) => li == j ? {...L, text: val} : L)} : x); }, false); }}/>)}</div>
-        <div className="row" style={{marginTop: 8}}>
+        <div className="row" style={{marginTop: 4}}>{texts.map((j) => <input key={n.id + ':' + j} className="fld" style={{flex: 1}} defaultValue={String(n.layers[j].text || '').replace(/\n/g, ' / ')} onChange={(e) => { const val = e.target.value.replace(/\s*\/\s*/g, '\n'); update((s) => { s.inserts = s.inserts.map((x) => x.id == n.id ? {...x, layers: x.layers.map((L, li) => li == j ? {...L, text: val} : L)} : x); }, false); }}/>)}
           <button className="btn" onClick={() => selectIns(R.inserts[(k - 1 + R.inserts.length) % R.inserts.length].id)}>◀</button>
-          <button className="btn" onClick={() => moreIdeas(n)}>✨ Ещё идеи</button>
+          <button className="btn" onClick={() => moreIdeas(n)}>✨ Идеи</button>
           <button className="btn" onClick={() => { update((s) => { s.inserts = s.inserts.filter((x) => x.id != n.id); }); setSelId(null); toast('🗑 Вставка убрана'); }}>🗑</button>
           <button className="btn" onClick={() => selectIns(R.inserts[(k + 1) % R.inserts.length].id)}>▶</button>
         </div>
@@ -322,8 +317,7 @@ ${GFX_DOC}
       </>;
     }
     if (mode == 'exp') return <>
-      <div className="row"><Tog on={q == 1080} label="Качество 1080p (выкл = 720p, быстрее)" onClick={() => { const v = q == 1080 ? 720 : 1080; setQ(v); LS.set('mnt_q', v); }}/></div>
-      <div className="row" style={{marginTop: 8}}><button className="btn lime" style={{flex: 1, padding: 13}} onClick={exportMp4}>⬇ Собрать и скачать MP4 ({fmt(R.outDur)})</button></div>
+      <div className="row"><Tog on={q == 1080} label="1080p" onClick={() => { const v = q == 1080 ? 720 : 1080; setQ(v); LS.set('mnt_q', v); }}/><button className="btn lime" style={{flex: 1}} onClick={exportMp4}>⬇ Скачать MP4 ({fmt(R.outDur)})</button></div>
     </>;
     return null;
   }
@@ -344,10 +338,10 @@ ${GFX_DOC}
     <div id="lineWrap">
       <div id="line" ref={lineRef} onPointerDown={onLineDown}>{R.pieces.map((p, i) => <div key={i + ':' + p.s} className={'pc ' + (p.keep ? 'k' : 'x') + (p.gap ? ' g' : '')} style={{flexGrow: p.keep ? p.e - p.s : 0.0001}}></div>)}</div>
       <div id="chips">{R.inserts.map((n) => <div key={n.id} className={'ch' + (n.id == selId ? ' sel' : '')} style={{left: (100 * n.o / (R.outDur || 1)) + '%'}} onClick={(e) => { e.stopPropagation(); selectIns(n.id); }}>{n.icon}</div>)}</div>
-      <div id="ph" style={{left: 14 + (lineRef.current ? lineRef.current.clientWidth : 0) * clamp(T / (R.outDur || 1)) + 'px'}}></div>
+      <div id="ph" style={{left: 8 + (lineRef.current ? lineRef.current.clientWidth : 0) * clamp(T / (R.outDur || 1)) + 'px'}}></div>
       <div id="tinfo"><span>{fmt(T)}</span><span>{fmt(R.outDur)}{R.outDur < S.dur - 0.05 ? '  (было ' + fmt(S.dur) + ')' : ''}</span></div>
     </div>
-    <div id="modes">{[['mont', '✂ Монтаж'], ['ins', '✨ Вставки'], ['sub', '💬 Субтитры'], ['exp', '⬇ Скачать MP4']].map(([m, l]) => <button key={m} className={'md' + (mode == m ? ' on' : '')} onClick={() => setMode(m)}>{l}</button>)}</div>
+    <div id="modes">{[['mont', '✂ Монтаж'], ['ins', '✨ Вставки'], ['sub', '💬 Субтитры'], ['exp', '⬇ MP4']].map(([m, l]) => <button key={m} className={'md' + (mode == m ? ' on' : '')} onClick={() => setMode(m)}>{l}</button>)}</div>
     <div id="panel">{Panel()}</div>
     <div id="voice">
       <input id="cmd" placeholder="Скажи или напиши правку…" enterKeyHint="send" autoComplete="off" value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => { if (e.key == 'Enter') run(cmd); }}/>

@@ -95,3 +95,36 @@ header h1 b{color:var(--lime)}
 .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#aaa;text-align:center;padding:20px;font-weight:700}
 .empty b{color:#C6FF3D;font-size:22px}
 #root{height:100%}
+/* компактный интерфейс */
+header{padding:4px 8px 2px;gap:6px}
+header h1{font-size:14px}
+header .btn{padding:5px 10px;font-size:12px;border-radius:10px}
+#stage{padding:0 4px}
+#playerBox{border-radius:10px}
+#lineWrap{padding:4px 8px 0}
+#line{height:20px;border-radius:6px}
+#chips{height:22px;margin-top:2px}
+.ch{width:20px;height:20px;font-size:11px;border-radius:6px;border-width:1.5px}
+#ph{top:2px;height:44px;width:2px}
+#tinfo{position:absolute;right:12px;top:6px;font-size:10px;color:#fff;gap:8px;pointer-events:none;text-shadow:0 1px 2px #000;margin:0;padding:0}
+#tinfo span:first-child{display:none}
+#modes{padding:3px 8px;gap:4px}
+.md{padding:5px 10px;font-size:12px;border-radius:14px}
+#panel{padding:2px 8px 2px;min-height:0}
+.btn{padding:6px 10px;font-size:12px;border-radius:10px}
+.row{gap:5px}
+.tog{padding:5px 7px;font-size:12px;border-radius:10px;min-width:0;flex:none;gap:5px;white-space:nowrap}
+.tog i{width:26px;height:16px}
+.tog i::after{width:12px;height:12px}
+.tog.on i::after{left:12px}
+.car{height:40px;border-radius:10px}
+.car .nm{font-size:15px}
+.car .nm .e{font-size:18px}
+.car .ar{width:34px;font-size:18px}
+.vhead{font-size:10px;margin-bottom:3px}
+.dots{margin-top:3px}
+.hint{font-size:11px;margin-top:3px}
+.fld{padding:5px 8px;font-size:13px;border-radius:9px}
+#voice{padding:4px 8px calc(4px + env(safe-area-inset-bottom));gap:5px}
+#cmd{height:36px;font-size:13px;padding:0 12px;border-radius:18px}
+#mic,#send{width:36px;height:36px;font-size:15px}
