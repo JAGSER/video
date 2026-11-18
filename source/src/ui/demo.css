@@ -111,3 +111,8 @@ body{margin:0}
 .scard{position:absolute;width:104px;height:62px;border-radius:10px;color:#0B0B0F;display:flex;flex-direction:column;justify-content:flex-end;padding:8px;box-sizing:border-box}
 .scard b{font-size:12px}.scard span{font-size:10px;font-weight:500}
 .cap{font-family:Unbounded,sans-serif;font-weight:800;font-size:18px;color:#FFFFFF;text-shadow:0 2px 0 #0B0B0F}
+/* событие: анимации экрана проигрываются один раз; индикаторы ожидания крутятся всегда */
+.once [class],.once{animation-iteration-count:1!important;animation-fill-mode:both}
+.once .dot,.once .wv,.once .ring,.once .spin,.once .bob,.once .twinkle,.once .wipe,.once .pbar>div,.busyon .pbar>div{animation-iteration-count:infinite!important}
+.still [class]{animation:none!important}
+.still .dot,.still .wv,.still .ring{animation-iteration-count:infinite}
